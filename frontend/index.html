@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Optimasi Rute Rumah Sakit Kupang</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+
+  <header>
+    <h1>Optimasi Rute Menuju Rumah Sakit Rujukan di Kota Kupang</h1>
+  </header>
+
+  <div class="controls">
+    <div class="control-group">
+      <label for="fromLocation">Dari Lokasi:</label>
+      <select id="fromLocation"></select>
+    </div>
+    <div class="control-group">
+      <label for="targetRS">Ke Lokasi:</label>
+      <select id="targetRS"></select>
+    </div>
+    <button id="btnHitung">Hitung Rute Tercepat</button>
+    <button id="btnReset" class="btn-reset">Reset Rute</button>
+    <button id="btnShowMatrix" class="btn-matrix">Lihat Matriks</button>
+    <button id="btnShowAllPairs" class="btn-matrix">Lihat Semua Jalur</button>
+  </div>
+
+  <div id="loading" class="loading hidden">
+    <div class="spinner"></div>
+    <p>Memuat data...</p>
+  </div>
+
+  <div id="notification" class="notification hidden"></div>
+
+  <div id="routeInfo" class="route-info hidden">
+    <h3>Informasi Rute</h3>
+    <div id="routeDetails"></div>
+  </div>
+
+  <div id="matrixModal" class="modal hidden">
+    <div class="modal-content">
+      <span class="close-modal" id="closeMatrix">&times;</span>
+      <h3>Matriks Hasil Floyd-Warshall</h3>
+      <div class="matrix-tabs">
+        <button class="tab-btn active" data-tab="distance">Jarak (km)</button>
+        <button class="tab-btn" data-tab="duration">Waktu (menit)</button>
+      </div>
+      <div class="matrix-legend">
+        <span><span class="legend-box direct"></span> Jalur langsung</span>
+        <span><span class="legend-box indirect"></span> Jalur tidak langsung (lebih pendek)</span>
+      </div>
+      <div id="matrixContainer" class="matrix-container"></div>
+    </div>
+  </div>
+
+  <div id="allPairsModal" class="modal hidden">
+    <div class="modal-content">
+      <span class="close-modal" id="closeAllPairs">&times;</span>
+      <h3>Tabel Semua Jalur Terpendek (All-Pairs Shortest Path)</h3>
+      <div class="matrix-tabs">
+        <button class="tab-btn active" data-tab="distance">Berdasarkan Jarak</button>
+        <button class="tab-btn" data-tab="duration">Berdasarkan Waktu</button>
+      </div>
+      <div id="allPairsContainer" class="all-pairs-container"></div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <h4>Legenda</h4>
+    <div class="legend-item">
+      <span class="marker-home"></span>
+      <span>Rumah Anda</span>
+    </div>
+    <div class="legend-item">
+      <span class="marker-hospital"></span>
+      <span>Rumah Sakit</span>
+    </div>
+    <div class="legend-item">
+      <span class="line-route"></span>
+      <span>Rute Tercepat</span>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script src="floydWarshall.js"></script>
+  <script src="app.js"></script>
+
+</body>
+</html>
