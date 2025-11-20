@@ -142,7 +142,6 @@ gis-rs-kupang/
 │   └── styles.css                       # Styling
 │
 ├── README.md                            # Dokumentasi ini
-└── SCRIPT_PRESENTASI.md                # Script presentasi
 ```
 
 ---
@@ -659,7 +658,6 @@ Jika ada pertanyaan atau masalah:
 
 - **Email**: [asmaraninada16@gmail.com]
 - **GitHub Issues**: [Link ke repository issues]
-- **Documentation**: Lihat file ini dan `SCRIPT_PRESENTASI.md`
 
 ---
 
