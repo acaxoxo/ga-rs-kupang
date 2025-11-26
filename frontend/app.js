@@ -1,6 +1,5 @@
 let map;
 let hospitals = [];
-let origin;
 let distanceMatrix;
 let durationMatrix;
 let originalDistanceMatrix;
@@ -8,15 +7,7 @@ let originalDurationMatrix;
 let floydWarshallResult = null;
 let allLocations = [];
 let polylineLayer = null;
-let homeMarker = null;
 let hospitalMarkers = [];
-
-const homeIcon = L.icon({
-    iconUrl: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMCIgaGVpZ2h0PSI0MCIgdmlld0JveD0iMCAwIDMwIDQwIj48cGF0aCBmaWxsPSIjZmY1NzIyIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMiIgZD0iTTE1IDAgQyA4IDAgMyA1IDMgMTIgQyAzIDE4IDguNSAyNSAxNSA0MCBDIDIxLjUgMjUgMjcgMTggMjcgMTIgQyAyNyA1IDIyIDAgMTUgMCBaIE0gMTUgMTcgQyAxMiAxNyAxMCAxNSAxMCAxMiBDIDEwIDkgMTIgNyAxNSA3IEMgMTggNyAyMCA5IDIwIDEyIEMgMjAgMTUgMTggMTcgMTUgMTcgWiIvPjwvc3ZnPg==',
-    iconSize: [30, 40],
-    iconAnchor: [15, 40],
-    popupAnchor: [0, -40]
-});
 
 const hospitalIcon = L.icon({
     iconUrl: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMCIgaGVpZ2h0PSI0MCIgdmlld0JveD0iMCAwIDMwIDQwIj48cGF0aCBmaWxsPSIjMjE5NmYzIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMiIgZD0iTTE1IDAgQyA4IDAgMyA1IDMgMTIgQyAzIDE4IDguNSAyNSAxNSA0MCBDIDIxLjUgMjUgMjcgMTggMjcgMTIgQyAyNyA1IDIyIDAgMTUgMCBaIE0gMTUgMTcgQyAxMiAxNyAxMCAxNSAxMCAxMiBDIDEwIDkgMTIgNyAxNSA3IEMgMTggNyAyMCA5IDIwIDEyIEMgMjAgMTUgMTggMTcgMTUgMTcgWiIvPjwvc3ZnPg==',
@@ -24,6 +15,25 @@ const hospitalIcon = L.icon({
     iconAnchor: [15, 40],
     popupAnchor: [0, -40]
 });
+
+// Icon colors based on road class
+function getHospitalIcon(roadClass) {
+    const colors = {
+        'arteri_primer': '#e74c3c',      // Red
+        'arteri_sekunder': '#f39c12',    // Orange  
+        'jalan_lokal': '#3498db'         // Blue
+    };
+    const color = colors[roadClass] || '#2196f3';
+    
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="40" viewBox="0 0 30 40"><path fill="${color}" stroke="#fff" stroke-width="2" d="M15 0 C 8 0 3 5 3 12 C 3 18 8.5 25 15 40 C 21.5 25 27 18 27 12 C 27 5 22 0 15 0 Z M 15 17 C 12 17 10 15 10 12 C 10 9 12 7 15 7 C 18 7 20 9 20 12 C 20 15 18 17 15 17 Z"/></svg>`;
+    
+    return L.icon({
+        iconUrl: 'data:image/svg+xml;base64,' + btoa(svg),
+        iconSize: [30, 40],
+        iconAnchor: [15, 40],
+        popupAnchor: [0, -40]
+    });
+}
 
 function showLoading(show = true) {
     const loadingEl = document.getElementById("loading");
@@ -64,11 +74,10 @@ async function loadDataset() {
 
         const data = await res.json();
 
-        if (!data.locations || !data.hospitals || !data.matrices) {
+        if (!data.hospitals || !data.matrices) {
             throw new Error("Data tidak lengkap");
         }
 
-        origin = data.locations["0"];
         hospitals = Object.values(data.hospitals);
         distanceMatrix = data.matrices.distances_m;
         durationMatrix = data.matrices.durations_s;
@@ -77,11 +86,8 @@ async function loadDataset() {
         originalDistanceMatrix = distanceMatrix.map(row => [...row]);
         originalDurationMatrix = durationMatrix.map(row => [...row]);
 
-        // Build all locations array
-        allLocations = [
-            { id: 0, name: origin.name, lat: origin.lat, lng: origin.lng, type: "Rumah" },
-            ...hospitals
-        ];
+        // Build all locations array (semua RS)
+        allLocations = hospitals;
 
         // Populate FROM dropdown
         let fromSelect = document.getElementById("fromLocation");
@@ -89,36 +95,29 @@ async function loadDataset() {
         allLocations.forEach(loc => {
             let opt = document.createElement("option");
             opt.value = loc.id;
-            opt.textContent = `${loc.name}`;
+            opt.textContent = `${loc.name} (${loc.type})`;
             fromSelect.appendChild(opt);
         });
-        fromSelect.value = "0"; // Default: Rumah
+        fromSelect.value = "0"; // Default: RS pertama
 
         // Populate TO dropdown
         let select = document.getElementById("targetRS");
-        select.innerHTML = '<option value="">-- Pilih Tujuan --</option>';
+        select.innerHTML = '<option value="">-- Pilih RS Tujuan --</option>';
 
         allLocations.forEach(loc => {
             let opt = document.createElement("option");
             opt.value = loc.id;
-            opt.textContent = loc.name;
+            opt.textContent = `${loc.name} (${loc.type})`;
             select.appendChild(opt);
         });
 
-        homeMarker = L.marker([origin.lat, origin.lng], {
-            icon: homeIcon,
-            title: "Rumah"
-        })
-            .addTo(map)
-            .bindPopup("<b>Rumah Anda</b><br>" + origin.name);
-
         hospitals.forEach(h => {
             const marker = L.marker([h.lat, h.lng], {
-                icon: hospitalIcon,
+                icon: getHospitalIcon(h.road_class),
                 title: h.name
             })
                 .addTo(map)
-                .bindPopup(`<b>${h.name}</b><br><i>${h.type}</i>`);
+                .bindPopup(`<b>${h.name}</b><br><i>${h.type}</i><br>Jalan: ${h.road_class.replace(/_/g, ' ')}`);
             hospitalMarkers.push(marker);
         });
 
@@ -192,7 +191,6 @@ function hitungRuteTercepat() {
 async function fetchRealRoute(path, distMatrix, durMatrix) {
     try {
         const coordinates = path.map(idx => {
-            if (idx === 0) return [origin.lng, origin.lat];
             let h = hospitals.find(x => x.id === idx);
             return [h.lng, h.lat];
         });
@@ -225,6 +223,11 @@ async function fetchRealRoute(path, distMatrix, durMatrix) {
             map.fitBounds(polylineLayer.getBounds());
 
             displayRouteInfo(path, distMatrix, durMatrix);
+            
+            // Highlight path in graph visualization
+            if (window.graphVisualizer) {
+                highlightPathInGraph(path);
+            }
 
             showLoading(false);
             showNotification("Rute tercepat berhasil dihitung!", "success");
@@ -292,9 +295,14 @@ function resetRoute() {
     document.getElementById("routeInfo").classList.add("hidden");
     document.getElementById("fromLocation").value = "0";
     document.getElementById("targetRS").value = "";
+    
+    // Clear graph highlight
+    if (window.graphVisualizer) {
+        window.graphVisualizer.clearHighlight();
+    }
 
-    if (homeMarker && hospitalMarkers.length > 0) {
-        const group = L.featureGroup([homeMarker, ...hospitalMarkers]);
+    if (hospitalMarkers.length > 0) {
+        const group = L.featureGroup(hospitalMarkers);
         map.fitBounds(group.getBounds(), { padding: [50, 50] });
     }
 
@@ -442,6 +450,15 @@ function closeAllPairsModal() {
     document.getElementById("allPairsModal").classList.add("hidden");
 }
 
+function showGraphModal() {
+    if (!floydWarshallResult) {
+        showNotification("Hitung rute terlebih dahulu untuk melihat graf!", "error");
+        return;
+    }
+    
+    showGraphVisualization(hospitals, floydWarshallResult.distance.dist, 'weighted');
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
     initMap();
     await loadDataset();
@@ -450,8 +467,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("btnReset").onclick = resetRoute;
     document.getElementById("btnShowMatrix").onclick = showMatrixModal;
     document.getElementById("btnShowAllPairs").onclick = showAllPairsModal;
+    document.getElementById("btnShowGraph").onclick = showGraphModal;
     document.getElementById("closeMatrix").onclick = closeMatrixModal;
     document.getElementById("closeAllPairs").onclick = closeAllPairsModal;
+    document.getElementById("closeGraph").onclick = closeGraphModal;
 
     // Tab switching for matrix modal
     document.querySelectorAll("#matrixModal .tab-btn").forEach(btn => {

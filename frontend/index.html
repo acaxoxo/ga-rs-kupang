@@ -13,20 +13,22 @@
 <body>
 
   <header>
-    <h1>Optimasi Rute Menuju Rumah Sakit Rujukan di Kota Kupang</h1>
+    <h1>Optimasi Rute Antar Rumah Sakit di Kota Kupang</h1>
+    <p style="margin: 5px 0; font-size: 14px; color: #555;">Menggunakan Algoritma Floyd-Warshall untuk All-Pairs Shortest Path</p>
   </header>
 
   <div class="controls">
     <div class="control-group">
-      <label for="fromLocation">Dari Lokasi:</label>
+      <label for="fromLocation">Dari RS:</label>
       <select id="fromLocation"></select>
     </div>
     <div class="control-group">
-      <label for="targetRS">Ke Lokasi:</label>
+      <label for="targetRS">Ke RS:</label>
       <select id="targetRS"></select>
     </div>
     <button id="btnHitung">Hitung Rute Tercepat</button>
     <button id="btnReset" class="btn-reset">Reset Rute</button>
+    <button id="btnShowGraph" class="btn-graph">Lihat Graf Berarah</button>
     <button id="btnShowMatrix" class="btn-matrix">Lihat Matriks</button>
     <button id="btnShowAllPairs" class="btn-matrix">Lihat Semua Jalur</button>
   </div>
@@ -71,15 +73,42 @@
     </div>
   </div>
 
+  <div id="graphModal" class="modal hidden">
+    <div class="modal-content modal-large">
+      <span class="close-modal" id="closeGraph">&times;</span>
+      <h3>Visualisasi Graf Berarah - Algoritma Floyd-Warshall</h3>
+      <div class="matrix-tabs">
+        <button class="tab-btn active" onclick="updateGraphMode('weighted')">Graf Berbobot</button>
+        <button class="tab-btn" onclick="updateGraphMode('default')">Graf Sederhana</button>
+        <button class="tab-btn" onclick="updateGraphMode('path')">Highlight Jalur</button>
+      </div>
+      <canvas id="graphCanvas" style="border: 1px solid #ddd; border-radius: 8px; margin-top: 10px;"></canvas>
+      <div style="margin-top: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+        <h4 style="margin-top: 0;">Penjelasan Graf:</h4>
+        <ul style="margin: 5px 0; padding-left: 20px; font-size: 13px;">
+          <li><strong>Node (Lingkaran):</strong> Setiap Rumah Sakit dengan ID unik</li>
+          <li><strong>Edge (Garis):</strong> Koneksi langsung antar RS dengan bobot jarak</li>
+          <li><strong>Panah:</strong> Menunjukkan arah (graf berarah)</li>
+          <li><strong>Warna:</strong> Klasifikasi berdasarkan jenis jalan (arteri primer/sekunder/lokal)</li>
+          <li><strong>Floyd-Warshall:</strong> Mencari jalur terpendek melalui semua kemungkinan node perantara</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <div class="legend">
     <h4>Legenda</h4>
     <div class="legend-item">
-      <span class="marker-home"></span>
-      <span>Rumah Anda</span>
+      <span class="marker-red"></span>
+      <span>RS di Jalan Arteri Primer</span>
     </div>
     <div class="legend-item">
-      <span class="marker-hospital"></span>
-      <span>Rumah Sakit</span>
+      <span class="marker-orange"></span>
+      <span>RS di Jalan Arteri Sekunder</span>
+    </div>
+    <div class="legend-item">
+      <span class="marker-blue"></span>
+      <span>RS di Jalan Lokal</span>
     </div>
     <div class="legend-item">
       <span class="line-route"></span>
@@ -92,6 +121,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script src="floydWarshall.js"></script>
+  <script src="graphVisualization.js"></script>
   <script src="app.js"></script>
 
 </body>
