@@ -118,8 +118,6 @@ python -m http.server 8080
 
 ## 📖 Cara Menggunakan Program (Untuk Presentasi)
 
-## 📖 Cara Menggunakan Program (Untuk Presentasi)
-
 ### 🎯 Demo 1: Jalankan Satu Algoritma (3 menit)
 
 **Tujuan:** Menunjukkan cara kerja salah satu algoritma
