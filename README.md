@@ -1,383 +1,364 @@
-# Optimasi Rute Antar Rumah Sakit Kupang
+# Optimasi Rute Rumah Sakit Kupang - TSP
 
-Aplikasi web GIS untuk optimasi jaringan rute antar rumah sakit di Kota Kupang menggunakan **Algoritma Floyd-Warshall** dengan visualisasi graf berarah dan klasifikasi jalan arteri.
-
-![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)
-![Python](https://img.shields.io/badge/python-3.8+-green.svg)
-![Flask](https://img.shields.io/badge/flask-2.0+-red.svg)
-![License](https://img.shields.io/badge/license-MIT-yellow.svg)
+Aplikasi web untuk optimasi rute kunjungan rumah sakit di Kota Kupang menggunakan **Genetic Algorithm (GA)**, **Simulated Annealing (SA)**, dan **Differential Evolution (DE)** dengan visualisasi interaktif.
 
 ---
 
-## 📋 Daftar Isi
+## 📋 Tentang Proyek
 
-- [Tentang Proyek](#tentang-proyek)
-- [Fitur Utama](#fitur-utama)
-- [Teknologi](#teknologi)
-- [Instalasi & Setup](#instalasi--setup)
-- [Penggunaan](#penggunaan)
-- [Algoritma Floyd-Warshall](#algoritma-floyd-warshall)
-- [Troubleshooting](#troubleshooting)
+Sistem TSP (Travelling Salesman Problem) untuk mencari rute optimal mengunjungi **12 rumah sakit** di Kupang dengan jarak minimum. Cocok untuk monitoring kesehatan, distribusi medis, atau survei fasilitas.
 
----
-
-## 🎯 Tentang Proyek
-
-Sistem optimasi rute jaringan rumah sakit untuk mendukung **rujukan medis**, **distribusi logistik**, dan **emergency response** di Kota Kupang menggunakan algoritma Floyd-Warshall untuk menemukan jalur terpendek antar semua pasangan rumah sakit.
-
-### Masalah yang Diselesaikan
-
-**Use Case Medis:**
-- 🏥 **Rujukan Antar RS**: RS kecil merujuk pasien ke RS besar dengan rute optimal
-- 🚑 **Distribusi Logistik**: Ambulans, obat-obatan, vaksin, dan darah
-- 📊 **Analisis Jaringan**: Identifikasi RS dengan sentralitas tinggi (hub strategis)
-- 🗺️ **Public Access**: Masyarakat dari lokasi custom bisa cari RS terdekat
-
-### Solusi Teknis
-
-- ✅ **12 Rumah Sakit** sebagai node dalam graf berarah
-- ✅ **Floyd-Warshall Algorithm** untuk All-Pairs Shortest Path (132 pasangan)
-- ✅ **Visualisasi Graf Berarah** dengan Canvas API (800×600px interaktif)
-- ✅ **Klasifikasi Jalan Arteri** (Primer/Sekunder/Lokal) dengan color coding
-- ✅ **Dual Mode**: Hospital-to-Hospital (preprocessed) & Custom Location (real-time)
+**Fitur:**
+- ✅ 3 algoritma optimasi (GA, SA, DE) dengan parameter advanced
+- ✅ Visualisasi peta interaktif + grafik konvergensi real-time
+- ✅ Perbandingan performa algoritma
+- ✅ Multi-run benchmark untuk analisis statistik
+- ✅ Export hasil (JSON, CSV, PNG)
+- ✅ Reproducibility dengan global RNG seed
 
 ---
 
-## 🚀 Fitur Utama
+## 🚀 Algoritma
 
-### 1. Dual Mode System
+#### Genetic Algorithm (GA)
+- **Operators**: Tournament/Roulette/Rank selection, OX/PMX/ERX crossover, Swap/Inversion/Scramble mutation
+- **Advanced Features**:
+  - Adaptive mutation rate berdasarkan diversity
+  - 2-opt local search untuk improvement
+  - Greedy initialization (nearest neighbor)
+  - Diversity tracking dan automatic restart
+  - Stagnation detection
+- **Configurable**: Population size, generations, mutation/crossover rates, elitism
 
-#### Mode Hospital-to-Hospital (Floyd-Warshall)
-- Rute optimal antar 12 RS menggunakan algoritma preprocessed
-- Matriks 12×12 untuk distance & duration
-- Path reconstruction menampilkan RS perantara
-- Instant computation (< 1ms untuk 1,728 iterasi)
+#### Simulated Annealing (SA)
+- **Cooling Schedules**: Geometric (default), Linear, Exponential, Logarithmic
+- **Advanced Features**:
+  - Reheating mechanism untuk escape local optima
+  - Early stopping berdasarkan improvement threshold
+  - Acceptance rate diagnostics
+  - Temperature history tracking
+- **Configurable**: Initial/final temperature, cooling rate, iterations per temperature
 
-#### Mode Custom Location (Real-Time Routing)
-- **15+ Lokasi Preset** terorganisir dalam kategori:
-  - 🎓 **Kampus & Pendidikan**: Undana Penfui, Unkriswina, Poltek Kupang
-  - 🚌 **Transportasi**: Bandara El Tari, Terminal Oebobo, Terminal Kota
-  - 🛒 **Pusat Kota & Belanja**: Flobamora Mall, Lippo Plaza, Pasar Inpres, Pasar Oeba
-  - 🏛️ **Perkantoran**: Kantor Gubernur NTT, Kantor Walikota
-  - 🕌 **Tempat Ibadah**: Katedral Kupang, Masjid Raya
-- **Klik Peta**: Pilih lokasi arbitrary dengan klik langsung di peta
-- Direct routing ke RS terdekat via ORS API
-- **User-friendly**: Tidak perlu input koordinat manual, cukup pilih dari dropdown
+#### Differential Evolution (DE)
+- **Strategies**: DE/rand/1 (default), DE/best/1, DE/current-to-best/1
+- **Crossover Types**: Binomial (default), Exponential
+- **Advanced Features**:
+  - Self-adaptive F dan CR (jDE)
+  - Position-based encoding untuk TSP
+  - Automatic tour repair mechanism
+- **Configurable**: Population size, generations, F (mutation factor), CR (crossover probability)
 
-### 2. Visualisasi Graf Berarah
-- **Canvas 800×600**: Node (RS) + Edge (jalan) + Panah (arah)
-- **3 Mode Graf**:
-  - Graf Berbobot: Tampilkan jarak (km) di setiap edge
-  - Graf Sederhana: Struktur tanpa label
-  - Highlight Jalur: Path berwarna hijau tebal hasil Floyd-Warshall
-- **Interactive Controls**: Pilih RS asal-tujuan untuk visualisasi path
+**1. Genetic Algorithm (GA)**
+- Selection: Tournament, Roulette Wheel, Rank-Based
+- Crossover: Order (OX), PMX, Edge Recombination (ERX)
+- Mutation: Swap, Inversion, Scramble
+- Features: Elitism, adaptive mutation, 2-opt local search, diversity tracking
 
-### 3. Klasifikasi Jalan Arteri
-- 🔴 **Arteri Primer** (4 RS): Jalan utama kota (Jl. El Tari, Timor Raya)
-- 🟠 **Arteri Sekunder** (4 RS): Jalan penghubung kawasan
-- 🔵 **Jalan Lokal** (4 RS): Jalan lingkungan/perumahan
-- Color-coded markers & edges untuk analisis aksesibilitas
+**2. Simulated Annealing (SA)**
+- Cooling Schedules: Geometric, Linear, Exponential, Logarithmic
+- Features: Reheating mechanism, early stopping
 
-### 4. Matriks & Tabel Interaktif
-- **Matriks Jarak**: 12×12 symmetric matrix dengan hover tooltip
-- **All-Pairs Table**: 132 pasangan dengan kolom Jalur, Jarak, Status
-- **Badge "Tidak Langsung"**: Identifikasi jalur via perantara
-
-### 5. Peta Interaktif (Leaflet.js)
-- Polyline biru untuk rute hasil perhitungan
-- Auto-zoom ke area rute
-- Info panel: jarak, waktu, detail segment
+**3. Differential Evolution (DE)**
+- Strategies: rand/1, best/1, current-to-best/1
+- Crossover: Binomial, Exponential
+- Features: Self-adaptive F/CR (jDE)
 
 ---
 
 ## 🛠️ Teknologi
 
-**Backend:** Python 3.8+ • Flask 2.0+ • Flask-CORS • Requests
+**Backend:** Python 3.8+ • Flask • OpenRouteService API
 
-**Frontend:** HTML5 • CSS3 • Vanilla JavaScript • Leaflet.js 1.9.4 • Canvas API
-
-**External API:** OpenRouteService (Matrix API, Directions API)
-
-**Algorithm:** Floyd-Warshall (O(n³) All-Pairs Shortest Path)
+**Frontend:** HTML5 • CSS3 • JavaScript • Leaflet.js • Canvas API
 
 ---
 
-## 📦 Instalasi & Setup
+## 📦 Instalasi & Menjalankan Program
 
-### Prasyarat
-- Python 3.8+ dengan pip
-- Koneksi internet (untuk ORS API & Leaflet tiles)
-
-### Langkah Instalasi
+### Langkah 1: Setup Backend (Server Python)
 
 ```bash
-# 1. Clone repository
-git clone <repository-url>
-cd gis-rs-kupang
-
-# 2. Setup virtual environment (recommended)
-python -m venv venv
-venv\Scripts\activate  # Windows
-# source venv/bin/activate  # Linux/Mac
-
-# 3. Install dependencies
+# 1. Masuk ke folder backend
 cd backend
+
+# 2. Install library yang dibutuhkan
 pip install -r requirements.txt
 
-# 4. (Optional) Regenerate matrix data
-cd scripts
-python generate_matriks_ors.py
-
-# 5. Run server
-cd ..
+# 3. Jalankan server
 python app.py
-# Server berjalan di http://127.0.0.1:5000
-
-# 6. Buka di browser
-# http://127.0.0.1:5000
 ```
 
-**File struktur penting:**
-```
-backend/
-  ├── app.py                      # Flask server
-  ├── requirements.txt            # Dependencies
-  ├── data/
-  │   ├── dataset_with_matrix.json   # Data 12 RS + matriks
-  │   ├── distance_matrix.csv        # Matriks jarak
-  │   └── duration_matrix.csv        # Matriks waktu
-  └── scripts/
-      └── generate_matriks_ors.py    # Generate matriks dari ORS
+**Server akan berjalan di:** `http://localhost:5000`
 
-frontend/
-  ├── index.html                  # Main UI
-  ├── app.js                      # Main logic + Custom location
-  ├── floydWarshall.js            # Floyd-Warshall implementation
-  ├── graphVisualization.js       # Canvas graf berarah
-  └── styles.css                  # Styling
+> **Catatan:** API Key OpenRouteService sudah tersedia di kode, tidak perlu setup manual.
+
+### Langkah 2: Buka Frontend (Aplikasi Web)
+
+**Ada 2 cara:**
+
+**Cara 1 - Langsung buka file (PALING MUDAH):**
+```bash
+# Buka file ini di browser (Chrome/Firefox/Edge):
+frontend/index.html
 ```
+
+**Cara 2 - Menggunakan HTTP server:**
+```bash
+cd frontend
+python -m http.server 8080
+# Lalu buka browser ke: http://localhost:8080
+```
+
+### ✅ Cek Program Sudah Jalan
+
+- Backend ✓ → Terminal menampilkan "Running on http://127.0.0.1:5000"
+- Frontend ✓ → Browser menampilkan peta Kupang dengan 12 rumah sakit
 
 ---
 
-## 📖 Penggunaan
+## 📖 Cara Menggunakan Program (Untuk Presentasi)
 
-### Mode 1: Hospital-to-Hospital (Floyd-Warshall)
+## 📖 Cara Menggunakan Program (Untuk Presentasi)
 
-1. **Pilih Rute**: Dropdown "Dari RS" dan "Ke RS"
-2. **Hitung**: Klik "Hitung Rute Tercepat"
-3. **Lihat Hasil**: Rute biru di peta + info jarak/waktu
-4. **Eksplorasi**:
-   - **Lihat Matriks Jarak**: Tabel 12×12 symmetric matrix
-   - **Lihat Tabel All-Pairs**: 132 pasangan dengan detail jalur
-   - **Lihat Graf Berarah**: Visualisasi canvas interaktif
-     - Mode: Berbobot, Sederhana, Highlight Jalur
-     - Pilih RS asal-tujuan untuk highlight path hijau
+### 🎯 Demo 1: Jalankan Satu Algoritma (3 menit)
 
-### Mode 2: Custom Location (Real-Time Routing)
+**Tujuan:** Menunjukkan cara kerja salah satu algoritma
 
-1. **Switch Mode**: Pilih "Custom - Dari Lokasi Lain"
-2. **Set Lokasi** (3 cara):
-   - **Preset**: Pilih dari dropdown (Penfui, Terminal, Bandara, dll)
-   - **Klik Peta**: Klik sembarang titik di peta Kupang
-   - **Manual**: Input koordinat lat/lng → "Set Lokasi"
-3. **Pilih RS Tujuan**: Dropdown RS
-4. **Hitung Rute**: Direct routing dari custom point ke RS
-5. **Reset**: Kembali ke mode hospital atau pilih lokasi baru
+**Langkah-langkah:**
+1. **Pilih Algoritma** → Misalnya "Genetic Algorithm (GA)"
+2. **Pilih RS Awal** → Misalnya "RSUD Prof. Dr. W.Z. Johannes"
+3. **Klik "Jalankan Optimasi"** (tombol hijau)
+4. **Tunggu proses** → Akan muncul animasi visualisasi
+5. **Lihat Hasil:**
+   - **Box Hasil** → Jarak total (km), waktu tempuh, waktu komputasi
+   - **Canvas Kiri** → Visualisasi tour (garis biru menghubungkan RS)
+   - **Grafik Kanan** → Konvergensi algoritma (perbaikan rute per iterasi)
+   - **Peta Bawah** → Rute nyata di Kota Kupang
 
-**Tips:**
-- Custom mode cocok untuk emergency dari lokasi arbitrary
-- Hospital mode cocok untuk analisis jaringan RS
+**Penjelasan saat presentasi:**
+- "Algoritma mencari rute terpendek untuk mengunjungi 12 RS"
+- "Grafik menunjukkan algoritma terus memperbaiki solusi"
+- "Hasil akhir: rute dengan jarak X km, waktu Y menit"
 
 ---
 
-## 🧮 Algoritma Floyd-Warshall
+### 🏆 Demo 2: Bandingkan Semua Algoritma (5 menit)
 
-### Konsep Dasar
+**Tujuan:** Menunjukkan performa GA vs SA vs DE
 
-Algoritma **Dynamic Programming** untuk mencari jalur terpendek antara **semua pasangan vertex** (All-Pairs Shortest Path) dalam graf berbobot dengan kompleksitas **O(n³)**.
+**Langkah-langkah:**
+1. **Klik "Bandingkan Semua Algoritma"** (tombol biru)
+2. **Tunggu proses** → 3 algoritma dijalankan bersamaan
+3. **Lihat Tabel Perbandingan:**
+   - Jarak terbaik (km)
+   - Waktu eksekusi (ms)
+   - Tour hasil masing-masing
 
-**Untuk 12 RS:** 12³ = **1,728 operasi** → < 1ms computation time
-
-### Pseudocode
-
-```plaintext
-FloydWarshall(dist):
-    n = jumlah vertex
-    
-    // Inisialisasi next matrix untuk path reconstruction
-    for i = 0 to n-1:
-        for j = 0 to n-1:
-            if dist[i][j] < ∞:
-                next[i][j] = j
-    
-    // Triple nested loop - core algorithm
-    for k = 0 to n-1:              // Vertex perantara
-        for i = 0 to n-1:          // Vertex asal
-            for j = 0 to n-1:      // Vertex tujuan
-                if dist[i][k] + dist[k][j] < dist[i][j]:
-                    dist[i][j] = dist[i][k] + dist[k][j]
-                    next[i][j] = next[i][k]  // Update path
-    
-    return dist, next
-```
-
-### Implementasi JavaScript (Core)
-
-```javascript
-function floydWarshall(dist) {
-    const n = dist.length;
-    const next = Array.from({ length: n }, () => Array(n).fill(null));
-
-    // Inisialisasi next matrix
-    for (let i = 0; i < n; i++) {
-        for (let j = 0; j < n; j++) {
-            if (dist[i][j] < Infinity) next[i][j] = j;
-        }
-    }
-
-    // Triple loop: k = perantara, i = asal, j = tujuan
-    for (let k = 0; k < n; k++) {
-        for (let i = 0; i < n; i++) {
-            for (let j = 0; j < n; j++) {
-                if (dist[i][k] + dist[k][j] < dist[i][j]) {
-                    dist[i][j] = dist[i][k] + dist[k][j];
-                    next[i][j] = next[i][k];
-                }
-            }
-        }
-    }
-    return { dist, next };
-}
-
-// Path Reconstruction
-function reconstructPath(next, i, j) {
-    if (next[i][j] === null) return [];
-    let path = [i];
-    while (i !== j) {
-        i = next[i][j];
-        path.push(i);
-    }
-    return path;  // [0, 3, 7, 11] - urutan RS yang dilalui
-}
-```
-
-### Contoh Optimasi Real
-
-**Sebelum Floyd-Warshall:**
-```
-RS A → RS B: 8.5 km (jalur langsung)
-```
-
-**Setelah Floyd-Warshall:**
-```
-RS A → RS C → RS B: 7.2 km (via perantara RS C)
-HEMAT: 1.3 km (15%)
-```
-
-### Visualisasi Graf
-
-Sistem ini memvisualisasikan algoritma dalam **3 mode**:
-
-1. **Graf Berbobot**: Tampilkan bobot (jarak) di setiap edge
-2. **Graf Sederhana**: Struktur graf tanpa label
-3. **Highlight Jalur**: Path hasil Floyd-Warshall dengan warna hijau tebal
-
-**Node positioning:** Circular layout untuk clarity (radius 250px)
-
-**Edge rendering:** Directed arrows dengan color by klasifikasi jalan
+**Penjelasan saat presentasi:**
+- "Kita jalankan 3 algoritma dengan parameter sama"
+- "Bisa lihat mana yang lebih cepat dan lebih optimal"
+- Contoh: "GA mendapat jarak X km dalam Y detik, sementara SA..."
 
 ---
 
-## 🏥 Data Rumah Sakit (12 Lokasi)
+### 📊 Demo 3: Benchmark Multi-Run (7 menit)
 
-| ID | Nama RS | Klasifikasi | Latitude | Longitude |
-|----|---------|-------------|----------|-----------|
-| 0 | RSUP Dr. Ben Mboi | 🔴 Arteri Primer | -10.220964 | 123.577964 |
-| 1 | RSUD Prof. Dr. W. Z. Johannes | 🔴 Arteri Primer | -10.168121 | 123.585788 |
-| 2 | RSAL Samuel J. Moeda | 🔴 Arteri Primer | -10.175598 | 123.555662 |
-| 3 | RS Tk. III Wirasakti (TNI AD) | 🔴 Arteri Primer | -10.166161 | 123.583353 |
-| 4 | RS Siloam Kupang | 🟠 Arteri Sekunder | -10.157099 | 123.610376 |
-| 5 | RSUD S. K. Lerik | 🟠 Arteri Sekunder | -10.149674 | 123.608812 |
-| 6 | RS St. Carolus Borromeus | 🟠 Arteri Sekunder | -10.214981 | 123.620588 |
-| 7 | RSU Leona | 🟠 Arteri Sekunder | -10.170494 | 123.627402 |
-| 8 | RSU Mamami | 🔵 Jalan Lokal | -10.153394 | 123.609183 |
-| 9 | RS Kartini Kupang | 🔵 Jalan Lokal | -10.156561 | 123.628247 |
-| 10 | RSIA Dedari | 🔵 Jalan Lokal | -10.165508 | 123.627679 |
-| 11 | RS Jiwa Naimata | 🔵 Jalan Lokal | -10.178839 | 123.639063 |
+**Tujuan:** Analisis statistik untuk validasi ilmiah
 
-**Klasifikasi Jalan Arteri:**
-- 🔴 **Primer**: Jalan utama kota dengan akses cepat (Jl. El Tari, Timor Raya)
-- 🟠 **Sekunder**: Jalan penghubung kawasan
-- 🔵 **Lokal**: Jalan lingkungan/perumahan
+**Langkah-langkah:**
+1. **Klik "Benchmark (Multi-Run)"** (tombol kuning)
+2. **Pilih:**
+   - Algoritma: GA / SA / DE
+   - Jumlah trials: 10-30 (untuk presentasi, jangan terlalu banyak)
+3. **Klik "Jalankan Benchmark"**
+4. **Lihat Statistik:**
+   - Mean (rata-rata)
+   - Median (nilai tengah)
+   - Std Dev (konsistensi)
+   - Min/Max (range hasil)
+   - Tabel semua trial
+
+**Penjelasan saat presentasi:**
+- "Kita jalankan algoritma 30 kali untuk uji konsistensi"
+- "Std dev kecil = algoritma stabil, hasil tidak random"
+- "Bisa bandingkan 3 algoritma: mana yang paling konsisten"
+
+---
+
+### ⚙️ Demo 4: Atur Parameter (Advanced - Opsional)
+
+**Tujuan:** Menunjukkan fleksibilitas parameter
+
+**Langkah-langkah:**
+1. **Klik "Atur Parameter"**
+2. **Ubah parameter** (contoh untuk GA):
+   - Population: 100 → 200 (lebih banyak solusi kandidat)
+   - Generations: 200 → 500 (lebih banyak iterasi)
+   - Mutation rate: 0.01 → 0.05 (lebih eksploratif)
+3. **Jalankan dan bandingkan dengan parameter default**
+
+**Penjelasan saat presentasi:**
+- "Parameter mempengaruhi performa algoritma"
+- "Population besar → lebih bagus tapi lebih lambat"
+- "Ini menunjukkan trade-off antara kualitas dan kecepatan"
+
+---
+
+### 🔄 Demo 5: Reproducibility dengan Seed
+
+**Tujuan:** Menunjukkan hasil bisa direproduksi (penting untuk penelitian)
+
+**Langkah-langkah:**
+1. **Input seed** (angka apa saja, misalnya: `12345`)
+2. **Centang checkbox "Gunakan"**
+3. **Jalankan algoritma** → Catat hasilnya
+4. **Klik Reset**
+5. **Input seed yang sama** → Jalankan lagi
+6. **Hasil akan IDENTIK 100%**
+
+**Penjelasan saat presentasi:**
+- "Seed memastikan hasil bisa diulang"
+- "Penting untuk validasi ilmiah dan debugging"
+- "Seed sama = random number sequence sama = hasil sama"
+
+---
+
+### 💾 Demo 6: Export Hasil
+
+**Langkah-langkah:**
+1. **Setelah jalankan algoritma**
+2. **Klik "Export Hasil"**
+3. **Akan download 5 file:**
+   - `results.json` → Data lengkap
+   - `tour.csv` → Urutan RS
+   - `convergence.csv` → Data grafik
+   - `tour.png` → Gambar visualisasi tour
+   - `chart.png` → Gambar grafik konvergensi
+
+**Penjelasan saat presentasi:**
+- "Hasil bisa di-export untuk analisis lebih lanjut"
+- "Format CSV bisa dibuka di Excel"
+- "Gambar PNG bisa dimasukkan ke laporan"
+
+---
+
+## 💡 Tips Presentasi
+
+### ✅ Yang Harus Ditunjukkan:
+1. **Cara kerja algoritma** → Gunakan Demo 1 dengan grafik konvergensi
+2. **Perbandingan performa** → Gunakan Demo 2 atau 3
+3. **Hasil visualisasi** → Peta + canvas tour sangat visual
+4. **Parameter pengaruh hasil** → Demo 4 (jika ada waktu)
+
+### ⚠️ Hindari:
+- Jangan jalankan benchmark dengan trials terlalu banyak (>50) saat presentasi
+- Jangan ubah terlalu banyak parameter sekaligus (bikin bingung)
+- Pastikan backend sudah running SEBELUM presentasi dimulai
+
+### 🎤 Script Pembukaan Presentasi:
+
+> "Kami membuat aplikasi optimasi rute kunjungan rumah sakit di Kupang menggunakan 3 algoritma evolusioner: Genetic Algorithm, Simulated Annealing, dan Differential Evolution. Aplikasi ini mencari rute terpendek untuk mengunjungi 12 rumah sakit dengan visualisasi interaktif. Mari saya demonstrasikan..."
+
+---
+
+## 🏥 Data Rumah Sakit
+
+**12 Rumah Sakit di Kupang:**
+- 4 RS di jalan arteri primer (merah)
+- 4 RS di jalan arteri sekunder (orange)
+- 4 RS di jalan lokal (biru)
+
+Matrix jarak menggunakan OpenRouteService Matrix API.
 
 ---
 
 ## 🔧 Troubleshooting
 
-### Server Error
+### ❌ Backend Tidak Jalan
 
+**Problem:** Error saat `python app.py`
+
+**Solusi:**
 ```bash
-# ModuleNotFoundError
+# Install ulang dependencies
+pip install flask flask-cors python-dotenv requests
+
+# Atau install dari requirements.txt
 pip install -r backend/requirements.txt
-
-# dataset JSON not found
-cd backend/scripts
-python generate_matriks_ors.py
-
-# ORS API error 403 (quota habis)
-# Daftar API key baru di openrouteservice.org
-# Update di backend/app.py dan scripts/generate_matriks_ors.py
 ```
 
-### Frontend Error
+### ❌ Frontend Tidak Muncul Peta
 
-```javascript
-// Peta tidak muncul
-// 1. Cek koneksi internet (Leaflet tiles butuh internet)
-// 2. Buka console browser (F12) untuk error
-// 3. Pastink file app.js, floydWarshall.js, graphVisualization.js loaded
+**Problem:** Halaman putih atau peta tidak tampil
 
-// Rute tidak muncul
-// 1. Cek backend server running (http://127.0.0.1:5000/api/dataset)
-// 2. Cek console untuk error ORS API
-// 3. Test endpoint /api/route dengan Postman
+**Solusi:**
+1. **Cek koneksi internet** (Leaflet butuh CDN)
+2. **Pastikan backend running** di `http://localhost:5000`
+3. **Buka browser console** (F12) → lihat error message
+4. **Coba browser lain** (Chrome recommended)
 
-// Graf tidak muncul
-// 1. Cek graphVisualization.js loaded
-// 2. Cek dataset_with_matrix.json valid (12 hospitals)
-// 3. Refresh halaman (Ctrl+R)
+### ❌ Algoritma Lambat / Browser Freeze
+
+**Problem:** Loading terlalu lama saat run algoritma
+
+**Solusi:**
+```
+1. Klik "Atur Parameter"
+2. Kurangi nilai:
+   - Population: 100 → 50
+   - Generations: 200 → 100
+   - Trials (benchmark): 30 → 10
 ```
 
-### Custom Location Error
+### ❌ Hasil Tidak Reproducible
 
-- **Koordinat tidak valid**: Format harus angka (-10.xxx, 123.xxx)
-- **Di luar area**: Kupang lat: -11 to -9, lng: 123 to 124
-- **ORS API error**: Cek koneksi internet dan quota API
+**Problem:** Seed sama tapi hasil beda
+
+**Solusi:**
+- ✅ Pastikan **checkbox "Gunakan" tercentang**
+- ✅ Gunakan parameter yang sama
+- ✅ Pilih RS awal yang sama
+
+### ❌ Export Tidak Jalan
+
+**Problem:** Tombol "Export Hasil" disabled
+
+**Solusi:**
+- Jalankan algoritma dulu minimal 1x
+- Tombol baru aktif setelah ada hasil
 
 ---
 
-## 📚 Referensi
+## 📞 FAQ Presentasi
 
-1. **Floyd, R. W.** (1962). "Algorithm 97: Shortest Path". *Communications of the ACM*.
-2. **Warshall, S.** (1962). "A Theorem on Boolean Matrices". *Journal of the ACM*.
-3. **Cormen, T. H., et al.** (2009). *Introduction to Algorithms* (3rd ed.). MIT Press.
-4. **OpenRouteService Docs**: https://openrouteservice.org/dev/
-5. **Leaflet.js Docs**: https://leafletjs.com/reference.html
+**Q: Berapa lama waktu eksekusi?**
+- GA/SA/DE: 1-5 detik (parameter default)
+- Benchmark 30 trials: 30-90 detik
+- Tergantung spesifikasi laptop
+
+**Q: Kenapa hasil berbeda setiap kali dijalankan?**
+- Algoritma evolusioner menggunakan randomness
+- Untuk hasil konsisten, gunakan seed
+
+**Q: Algoritma mana yang terbaik?**
+- Tergantung kasus dan parameter
+- Jalankan benchmark multi-run untuk perbandingan objektif
+
+**Q: Data rumah sakit real atau simulasi?**
+- Data REAL dari OpenStreetMap
+- Koordinat GPS asli 12 RS di Kupang
+- Jarak dari OpenRouteService API (routing nyata)
+
+**Q: Bisa untuk kota lain?**
+- Ya, tinggal ganti koordinat RS di `dataset_with_matrix.json`
+- Generate ulang distance matrix dengan `generate_matriks_ors.py`
 
 ---
 
 ## 📄 License
 
-MIT License - Free to use for educational purposes
+MIT License - Free for educational use
 
 ---
 
-<div align="center">
-
-**⭐ Star this repository if you find it helpful!**
-
-Made with ❤️ for Analisis Algoritma Course
-
-*Optimizing Healthcare Routes, One Algorithm at a Time*
-
-</div>
+**Made for Algoritma Terinspirasi Evolusi Course**

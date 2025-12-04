@@ -14,54 +14,40 @@
 
   <header>
     <h1>Optimasi Rute Antar Rumah Sakit di Kota Kupang</h1>
-    <p class="header-subtitle">Menggunakan Algoritma Floyd-Warshall untuk All-Pairs Shortest Path</p>
+    <p class="header-subtitle">Travelling Salesman Problem dengan Algoritma Genetika, Simulated Annealing & Differential Evolution</p>
   </header>
 
   <div class="controls">
     <div class="control-row">
       <div class="control-group">
-        <label for="locationMode">Mode:</label>
-        <select id="locationMode">
-          <option value="hospital">Antar Rumah Sakit</option>
-          <option value="custom">Dari Alamat Saya</option>
+        <label for="algorithmSelect">Pilih Algoritma:</label>
+        <select id="algorithmSelect">
+          <option value="ga">Genetic Algorithm (GA)</option>
+          <option value="sa">Simulated Annealing (SA)</option>
+          <option value="de">Differential Evolution (DE)</option>
         </select>
       </div>
       
-      <div id="hospitalModeControls" class="control-group">
-        <label for="fromLocation">Dari RS:</label>
-        <select id="fromLocation"></select>
-      </div>
-      
-      <div id="customModeControls" class="control-group hidden">
-        <label for="customAddress">Alamat Lengkap:</label>
-        <input type="text" id="customAddress" placeholder="Contoh: Jl. Timor Raya No.15, Kelapa Lima, Kota Kupang" class="address-input">
-        <button id="btnGeocodeAddress" class="btn-geocode">📍 Cari Lokasi</button>
-      </div>
-      
       <div class="control-group">
-        <label for="targetRS">Ke RS:</label>
-        <select id="targetRS"></select>
+        <label for="startHospital">RS Awal:</label>
+        <select id="startHospital"></select>
+      </div>
+
+      <div class="control-group">
+        <label for="globalSeed">Seed:</label>
+        <input type="text" id="globalSeed" placeholder="opsional" style="width: 140px; padding: 6px 8px; border: 1.5px solid #bdbdbd; border-radius: 6px;">
+        <label for="useSeed">Gunakan</label>
+        <input type="checkbox" id="useSeed" />
       </div>
     </div>
     
     <div class="control-row button-row">
-      <button id="btnHitung" class="btn-primary">🚗 Hitung Rute Tercepat</button>
-      <button id="btnReset" class="btn-secondary">🔄 Reset</button>
-      <button id="btnShowGraph" class="btn-info">📊 Graf Berarah</button>
-      <button id="btnShowMatrix" class="btn-info">📋 Matriks</button>
-      <button id="btnShowAllPairs" class="btn-info">📑 Semua Jalur</button>
-    </div>
-    
-    <div id="customLocationInfo" class="custom-info hidden">
-      <span class="info-icon">📍</span>
-      <span id="customLocationName"></span>
-    </div>
-    
-    <div id="addressHelpText" class="help-text hidden">
-      <strong>💡 Tips Pencarian Alamat:</strong><br>
-      • Gunakan nama landmark/tempat terkenal: <em>"Flobamora Mall"</em>, <em>"Universitas Nusa Cendana"</em>, <em>"Terminal Oebobo"</em><br>
-      • Gunakan nama jalan utama: <em>"Jl. El Tari"</em>, <em>"Jl. Timor Raya"</em>, <em>"Jl. Soeharto"</em><br>
-      • Atau alamat lengkap: <em>"Jl. El Tari No.88, Oebobo"</em>
+      <button id="btnRunTSP" class="btn-primary">Jalankan Optimasi</button>
+      <button id="btnCompareTSP" class="btn-success">Bandingkan Semua Algoritma</button>
+      <button id="btnBenchmark" class="btn-info">Benchmark (Multi-Run)</button>
+      <button id="btnShowParameters" class="btn-info">Atur Parameter</button>
+      <button id="btnExportResults" class="btn-warning" disabled>Export Hasil</button>
+      <button id="btnReset" class="btn-secondary">Reset</button>
     </div>
   </div>
 
@@ -72,64 +58,226 @@
 
   <div id="notification" class="notification hidden"></div>
 
-  <div id="routeInfo" class="route-info hidden">
-    <h3>Informasi Rute</h3>
-    <div id="routeDetails"></div>
-  </div>
-
-  <div id="matrixModal" class="modal hidden">
+  <div id="parametersModal" class="modal hidden">
     <div class="modal-content">
-      <span class="close-modal" id="closeMatrix">&times;</span>
-      <h3>Matriks Hasil Floyd-Warshall</h3>
-      <div class="matrix-tabs">
-        <button class="tab-btn active" data-tab="distance">Jarak (km)</button>
-        <button class="tab-btn" data-tab="duration">Waktu (menit)</button>
+      <span class="close-modal" id="closeParameters">&times;</span>
+      <h3>Atur Parameter Algoritma</h3>
+      
+      <div id="tspParametersGA" class="tsp-parameters">
+        <h4>Parameter Genetic Algorithm</h4>
+        <div class="param-grid">
+          <div class="param-item">
+            <label for="gaPopulation">Populasi:</label>
+            <input type="number" id="gaPopulation" value="100" min="10" max="500">
+          </div>
+          <div class="param-item">
+            <label for="gaGenerations">Generasi:</label>
+            <input type="number" id="gaGenerations" value="500" min="50" max="2000">
+          </div>
+          <div class="param-item">
+            <label for="gaMutationRate">Mutation Rate:</label>
+            <input type="number" id="gaMutationRate" value="0.02" min="0" max="1" step="0.01">
+          </div>
+          <div class="param-item">
+            <label for="gaCrossoverRate">Crossover Rate:</label>
+            <input type="number" id="gaCrossoverRate" value="0.8" min="0" max="1" step="0.1">
+          </div>
+          <div class="param-item">
+            <label for="gaSelectionMethod">Selection Method:</label>
+            <select id="gaSelectionMethod">
+              <option value="tournament">Tournament</option>
+              <option value="roulette">Roulette Wheel</option>
+              <option value="rank">Rank-Based</option>
+            </select>
+          </div>
+          <div class="param-item">
+            <label for="gaCrossoverMethod">Crossover Method:</label>
+            <select id="gaCrossoverMethod">
+              <option value="ox">Order Crossover (OX)</option>
+              <option value="pmx">PMX Crossover</option>
+              <option value="erx">Edge Recombination (ERX)</option>
+            </select>
+          </div>
+          <div class="param-item">
+            <label for="gaMutationMethod">Mutation Method:</label>
+            <select id="gaMutationMethod">
+              <option value="swap">Swap Mutation</option>
+              <option value="inversion">Inversion Mutation</option>
+              <option value="scramble">Scramble Mutation</option>
+            </select>
+          </div>
+          <div class="param-item">
+            <label for="gaElitismCount">Elitism Count:</label>
+            <input type="number" id="gaElitismCount" value="2" min="0" max="10">
+          </div>
+          <div class="param-item">
+            <label for="gaAdaptiveMutation">Adaptive Mutation:</label>
+            <input type="checkbox" id="gaAdaptiveMutation" checked>
+          </div>
+          <div class="param-item">
+            <label for="gaLocalSearchProb">Local Search Prob:</label>
+            <input type="number" id="gaLocalSearchProb" value="0.1" min="0" max="1" step="0.05">
+          </div>
+          <div class="param-item">
+            <label for="gaDiversityThreshold">Diversity Threshold:</label>
+            <input type="number" id="gaDiversityThreshold" value="0.1" min="0" max="1" step="0.05">
+          </div>
+          <div class="param-item">
+            <label for="gaStagnationLimit">Stagnation Limit:</label>
+            <input type="number" id="gaStagnationLimit" value="50" min="10" max="200">
+          </div>
+        </div>
       </div>
-      <div class="matrix-legend">
-        <span><span class="legend-box direct"></span> Jalur langsung</span>
-        <span><span class="legend-box indirect"></span> Jalur tidak langsung (lebih pendek)</span>
+      
+      <div id="tspParametersSA" class="tsp-parameters hidden">
+        <h4>Parameter Simulated Annealing</h4>
+        <div class="param-grid">
+          <div class="param-item">
+            <label for="saInitialTemp">Initial Temp:</label>
+            <input type="number" id="saInitialTemp" value="10000" min="1000" max="50000">
+          </div>
+          <div class="param-item">
+            <label for="saFinalTemp">Final Temp:</label>
+            <input type="number" id="saFinalTemp" value="0.1" min="0.01" max="10" step="0.1">
+          </div>
+          <div class="param-item">
+            <label for="saCoolingRate">Cooling Rate:</label>
+            <input type="number" id="saCoolingRate" value="0.995" min="0.9" max="0.999" step="0.001">
+          </div>
+          <div class="param-item">
+            <label for="saIterationsPerTemp">Iterations/Temp:</label>
+            <input type="number" id="saIterationsPerTemp" value="100" min="10" max="500">
+          </div>
+          <div class="param-item">
+            <label for="saCoolingSchedule">Cooling Schedule:</label>
+            <select id="saCoolingSchedule">
+              <option value="geometric">Geometric</option>
+              <option value="linear">Linear</option>
+              <option value="exponential">Exponential</option>
+              <option value="logarithmic">Logarithmic</option>
+            </select>
+          </div>
+          <div class="param-item">
+            <label for="saReheating">Reheating:</label>
+            <input type="checkbox" id="saReheating">
+          </div>
+          <div class="param-item">
+            <label for="saReheatThreshold">Reheat Threshold:</label>
+            <input type="number" id="saReheatThreshold" value="100" min="10" max="500">
+          </div>
+          <div class="param-item">
+            <label for="saEarlyStop">Early Stopping:</label>
+            <input type="checkbox" id="saEarlyStop">
+          </div>
+        </div>
       </div>
-      <div id="matrixContainer" class="matrix-container"></div>
+      
+      <div id="tspParametersDE" class="tsp-parameters hidden">
+        <h4>Parameter Differential Evolution</h4>
+        <div class="param-grid">
+          <div class="param-item">
+            <label for="dePopulation">Populasi:</label>
+            <input type="number" id="dePopulation" value="100" min="10" max="500">
+          </div>
+          <div class="param-item">
+            <label for="deGenerations">Generasi:</label>
+            <input type="number" id="deGenerations" value="500" min="50" max="2000">
+          </div>
+          <div class="param-item">
+            <label for="deMutationFactor">Mutation Factor (F):</label>
+            <input type="number" id="deMutationFactor" value="0.8" min="0" max="2" step="0.1">
+          </div>
+          <div class="param-item">
+            <label for="deCrossoverProb">Crossover Prob (CR):</label>
+            <input type="number" id="deCrossoverProb" value="0.9" min="0" max="1" step="0.1">
+          </div>
+          <div class="param-item">
+            <label for="deStrategy">Strategy:</label>
+            <select id="deStrategy">
+              <option value="rand/1">DE/rand/1</option>
+              <option value="best/1">DE/best/1</option>
+              <option value="current-to-best/1">DE/current-to-best/1</option>
+            </select>
+          </div>
+          <div class="param-item">
+            <label for="deCrossoverType">Crossover Type:</label>
+            <select id="deCrossoverType">
+              <option value="binomial">Binomial</option>
+              <option value="exponential">Exponential</option>
+            </select>
+          </div>
+          <div class="param-item">
+            <label for="deSelfAdaptive">Self-Adaptive (jDE):</label>
+            <input type="checkbox" id="deSelfAdaptive">
+          </div>
+        </div>
+      </div>
+      
+      <div id="tspProgress" class="tsp-progress hidden">
+        <div class="progress-bar">
+          <div id="tspProgressBar" class="progress-fill"></div>
+        </div>
+        <p id="tspProgressText">Menjalankan optimasi...</p>
+      </div>
+      
+      <div id="tspResults" class="tsp-results hidden">
+        <h4>Hasil Optimasi</h4>
+        <div id="tspResultStats" class="result-stats"></div>
+        <div class="tsp-visualization">
+          <div class="viz-section">
+            <h5>Tour Cycle</h5>
+            <canvas id="tspTourCanvas" width="800" height="600"></canvas>
+          </div>
+          <div class="viz-section">
+            <h5>Grafik Konvergensi</h5>
+            <canvas id="tspConvergenceCanvas" width="800" height="400"></canvas>
+          </div>
+        </div>
+      </div>
+      
+      </div>
     </div>
   </div>
 
-  <div id="allPairsModal" class="modal hidden">
-    <div class="modal-content">
-      <span class="close-modal" id="closeAllPairs">&times;</span>
-      <h3>Tabel Semua Jalur Terpendek (All-Pairs Shortest Path)</h3>
-      <div class="matrix-tabs">
-        <button class="tab-btn active" data-tab="distance">Berdasarkan Jarak</button>
-        <button class="tab-btn" data-tab="duration">Berdasarkan Waktu</button>
-      </div>
-      <div id="allPairsContainer" class="all-pairs-container"></div>
-    </div>
-  </div>
-
-  <div id="graphModal" class="modal hidden">
+  <div id="resultsModal" class="modal hidden">
     <div class="modal-content modal-large">
-      <span class="close-modal" id="closeGraph">&times;</span>
-      <h3>Visualisasi Graf Berarah - Algoritma Floyd-Warshall</h3>
-      <div class="matrix-tabs">
-        <button class="tab-btn active" onclick="updateGraphMode('weighted')">Graf Berbobot</button>
-        <button class="tab-btn" onclick="updateGraphMode('default')">Graf Sederhana</button>
-        <button class="tab-btn" onclick="updateGraphMode('path')">Highlight Jalur</button>
+      <span class="close-modal" id="closeResults">&times;</span>
+      <h3>Hasil Optimasi TSP</h3>
+      
+      <div id="tspResults" class="tsp-results">
+        <div id="tspResultStats" class="result-stats"></div>
+        <div class="tsp-visualization">
+          <div class="viz-section">
+            <h5>Tour Cycle - Urutan Kunjungan RS</h5>
+            <canvas id="tspTourCanvas" width="800" height="600"></canvas>
+          </div>
+          <div class="viz-section">
+            <h5>Grafik Konvergensi Fitness</h5>
+            <canvas id="tspConvergenceCanvas" width="800" height="400"></canvas>
+          </div>
+        </div>
       </div>
-      <canvas id="graphCanvas" class="graph-canvas"></canvas>
-      <div class="graph-explanation">
-        <h4>Penjelasan Graf:</h4>
-        <ul>
-          <li><strong>Node (Lingkaran):</strong> Setiap Rumah Sakit dengan ID unik</li>
-          <li><strong>Edge (Garis):</strong> Koneksi langsung antar RS dengan bobot jarak</li>
-          <li><strong>Panah:</strong> Menunjukkan arah (graf berarah)</li>
-          <li><strong>Warna:</strong> Klasifikasi berdasarkan jenis jalan (arteri primer/sekunder/lokal)</li>
-          <li><strong>Floyd-Warshall:</strong> Mencari jalur terpendek melalui semua kemungkinan node perantara</li>
-        </ul>
+      
+      <div id="tspComparison" class="tsp-comparison hidden">
+        <h4>Perbandingan Algoritma</h4>
+        <table id="tspComparisonTable" class="comparison-table">
+          <thead>
+            <tr>
+              <th>Algoritma</th>
+              <th>Jarak Terbaik (km)</th>
+              <th>Waktu Eksekusi (ms)</th>
+              <th>Iterasi/Generasi</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="tspComparisonBody"></tbody>
+        </table>
       </div>
     </div>
   </div>
 
   <div class="legend">
-    <h4>Legenda</h4>
+    <h4>Legenda Peta</h4>
     <div class="legend-item">
       <span class="marker-red"></span>
       <span>RS di Jalan Arteri Primer</span>
@@ -144,16 +292,57 @@
     </div>
     <div class="legend-item">
       <span class="line-route"></span>
-      <span>Rute Tercepat</span>
+      <span>Rute TSP Tour</span>
     </div>
   </div>
 
   <div id="map"></div>
 
+  <!-- Benchmark Modal -->
+  <div id="benchmarkModal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 600px;">
+      <span class="close" onclick="document.getElementById('benchmarkModal').style.display='none'">&times;</span>
+      <h3>Benchmark Configuration</h3>
+      <div class="param-grid">
+        <div class="param-item">
+          <label for="benchmarkAlgorithm">Algorithm:</label>
+          <select id="benchmarkAlgorithm">
+            <option value="ga">Genetic Algorithm</option>
+            <option value="sa">Simulated Annealing</option>
+            <option value="de">Differential Evolution</option>
+          </select>
+        </div>
+        <div class="param-item">
+          <label for="benchmarkTrials">Number of Trials:</label>
+          <input type="number" id="benchmarkTrials" value="10" min="5" max="100">
+        </div>
+        <div class="param-item">
+          <label for="benchmarkSeedMode">Seed Mode:</label>
+          <select id="benchmarkSeedMode">
+            <option value="same">Same seed (reproducibility test)</option>
+            <option value="different">Different seeds (statistical test)</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top: 20px; text-align: center;">
+        <button id="btnStartBenchmark" class="btn-primary">Start Benchmark</button>
+        <button onclick="document.getElementById('benchmarkModal').style.display='none'" class="btn-secondary">Cancel</button>
+      </div>
+      <div id="benchmarkProgress" style="display: none; margin-top: 20px;">
+        <p>Running trial <span id="benchmarkCurrentTrial">0</span> of <span id="benchmarkTotalTrials">0</span>...</p>
+        <div style="background: #e0e0e0; border-radius: 4px; overflow: hidden;">
+          <div id="benchmarkProgressBar" style="height: 20px; background: #4CAF50; width: 0%; transition: width 0.3s;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <script src="floydWarshall.js"></script>
-  <script src="graphVisualization.js"></script>
+  <script src="geneticAlgorithm.js"></script>
+  <script src="simulatedAnnealing.js"></script>
+  <script src="differentialEvolution.js"></script>
+  <script src="tspVisualization.js"></script>
   <script src="app.js"></script>
 
 </body>

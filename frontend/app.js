@@ -2,27 +2,49 @@ let map;
 let hospitals = [];
 let distanceMatrix;
 let durationMatrix;
-let originalDistanceMatrix;
-let originalDurationMatrix;
-let floydWarshallResult = null;
-let allLocations = [];
 let polylineLayer = null;
 let hospitalMarkers = [];
-let customLocationMarker = null;
-let customLocation = null;
-let isRouteCalculated = false; // Flag untuk tracking apakah rute sudah dihitung
+let tspVisualizer = null;
+let convergenceChart = null;
+let comparisonResults = {};
 
-// Preset lokasi umum di Kupang - DEPRECATED (diganti dengan geocoding)
-// Kept for backward compatibility with map click feature
+// Seeded RNG support for reproducibility
+let __originalRandom = null;
+function mulberry32(a) {
+    return function() {
+        let t = a += 0x6D2B79F5;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
 
-const hospitalIcon = L.icon({
-    iconUrl: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMCIgaGVpZ2h0PSI0MCIgdmlld0JveD0iMCAwIDMwIDQwIj48cGF0aCBmaWxsPSIjMjE5NmYzIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMiIgZD0iTTE1IDAgQyA4IDAgMyA1IDMgMTIgQyAzIDE4IDguNSAyNSAxNSA0MCBDIDIxLjUgMjUgMjcgMTggMjcgMTIgQyAyNyA1IDIyIDAgMTUgMCBaIE0gMTUgMTcgQyAxMiAxNyAxMCAxNSAxMCAxMiBDIDEwIDkgMTIgNyAxNSA3IEMgMTggNyAyMCA5IDIwIDEyIEMgMjAgMTUgMTggMTcgMTUgMTcgWiIvPjwvc3ZnPg==',
-    iconSize: [30, 40],
-    iconAnchor: [15, 40],
-    popupAnchor: [0, -40]
-});
+function hashSeedToInt(seedStr) {
+    let h = 2166136261 >>> 0; // FNV-1a basis
+    const s = String(seedStr);
+    for (let i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+}
 
-// Icon colors based on road class
+function applySeed(seedStr) {
+    if (seedStr === undefined || seedStr === null || seedStr === '') return null;
+    const seedInt = typeof seedStr === 'number' ? (seedStr >>> 0) : hashSeedToInt(seedStr);
+    if (!__originalRandom) __originalRandom = Math.random;
+    Math.random = mulberry32(seedInt);
+    return seedInt;
+}
+
+function restoreRandom() {
+    if (__originalRandom) {
+        Math.random = __originalRandom;
+        __originalRandom = null;
+    }
+}
+
+// Hospital icon with colors based on road class
 function getHospitalIcon(roadClass) {
     const colors = {
         'arteri_primer': '#e74c3c',      // Red
@@ -65,16 +87,9 @@ function initMap() {
     map = L.map("map").setView([-10.16, 123.61], 12);
 
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19
+        maxZoom: 19,
+        attribution: '© OpenStreetMap contributors'
     }).addTo(map);
-    
-    // Event listener untuk klik peta (set custom location)
-    map.on('click', function(e) {
-        const mode = document.getElementById('locationMode').value;
-        if (mode === 'custom') {
-            setCustomLocationFromClick(e.latlng.lat, e.latlng.lng);
-        }
-    });
 }
 
 async function loadDataset() {
@@ -96,35 +111,17 @@ async function loadDataset() {
         distanceMatrix = data.matrices.distances_m;
         durationMatrix = data.matrices.durations_s;
 
-        // Save original matrices
-        originalDistanceMatrix = distanceMatrix.map(row => [...row]);
-        originalDurationMatrix = durationMatrix.map(row => [...row]);
-
-        // Build all locations array (semua RS)
-        allLocations = hospitals;
-
-        // Populate FROM dropdown
-        let fromSelect = document.getElementById("fromLocation");
-        fromSelect.innerHTML = '';
-        allLocations.forEach(loc => {
-            let opt = document.createElement("option");
-            opt.value = loc.id;
-            opt.textContent = `${loc.name} (${loc.type})`;
-            fromSelect.appendChild(opt);
-        });
-        fromSelect.value = "0"; // Default: RS pertama
-
-        // Populate TO dropdown
-        let select = document.getElementById("targetRS");
-        select.innerHTML = '<option value="">-- Pilih RS Tujuan --</option>';
-
-        allLocations.forEach(loc => {
-            let opt = document.createElement("option");
-            opt.value = loc.id;
-            opt.textContent = `${loc.name} (${loc.type})`;
-            select.appendChild(opt);
+        // Populate start hospital dropdown
+        const startHospitalSelect = document.getElementById("startHospital");
+        startHospitalSelect.innerHTML = '';
+        hospitals.forEach(h => {
+            const opt = document.createElement("option");
+            opt.value = h.id;
+            opt.textContent = `${h.name}`;
+            startHospitalSelect.appendChild(opt);
         });
 
+        // Add hospital markers to map
         hospitals.forEach(h => {
             const marker = L.marker([h.lat, h.lng], {
                 icon: getHospitalIcon(h.road_class),
@@ -136,7 +133,7 @@ async function loadDataset() {
         });
 
         showLoading(false);
-        showNotification("Data berhasil dimuat!", "success");
+        showNotification("Data berhasil dimuat! Silakan pilih algoritma dan jalankan optimasi.", "success");
         console.log("Dataset loaded:", data);
 
     } catch (error) {
@@ -146,675 +143,886 @@ async function loadDataset() {
     }
 }
 
-function hitungRuteTercepat() {
+function drawTourOnMap(tour) {
+    // Remove existing polyline
+    if (polylineLayer) {
+        polylineLayer.remove();
+    }
+    
+    // Create tour coordinates
+    const coords = tour.map(idx => {
+        const h = hospitals.find(x => x.id === idx);
+        return [h.lat, h.lng];
+    });
+    
+    // Close the tour
+    coords.push(coords[0]);
+    
+    // Draw on map
+    polylineLayer = L.polyline(coords, {
+        color: "#27ae60",
+        weight: 4,
+        opacity: 0.8
+    }).addTo(map);
+    
+    // Fit bounds
+    map.fitBounds(polylineLayer.getBounds(), { padding: [50, 50] });
+}
+
+function adjustTourStart(tour, startHospitalId) {
+    const startIndex = tour.indexOf(startHospitalId);
+    if (startIndex === 0) return tour;
+    
+    return [...tour.slice(startIndex), ...tour.slice(0, startIndex)];
+}
+
+async function runGeneticAlgorithm(startHospitalId, callback) {
+    const ga = new GeneticAlgorithm(distanceMatrix, hospitals);
+    
+    ga.setParameters({
+        populationSize: parseInt(document.getElementById("gaPopulation").value),
+        generations: parseInt(document.getElementById("gaGenerations").value),
+        mutationRate: parseFloat(document.getElementById("gaMutationRate").value),
+        crossoverRate: parseFloat(document.getElementById("gaCrossoverRate").value),
+        elitismCount: parseInt(document.getElementById("gaElitismCount").value),
+        adaptiveMutation: document.getElementById("gaAdaptiveMutation").checked,
+        localSearchProb: parseFloat(document.getElementById("gaLocalSearchProb").value),
+        diversityThreshold: parseFloat(document.getElementById("gaDiversityThreshold").value),
+        stagnationLimit: parseInt(document.getElementById("gaStagnationLimit").value),
+        selectionMethod: document.getElementById("gaSelectionMethod").value,
+        crossoverMethod: document.getElementById("gaCrossoverMethod").value,
+        mutationMethod: document.getElementById("gaMutationMethod").value
+    });
+    
+    const result = await ga.run(callback);
+    
+    // Adjust tour to start from selected hospital
+    result.bestTour = adjustTourStart(result.bestTour, startHospitalId);
+    
+    return result;
+}
+
+async function runSimulatedAnnealing(startHospitalId, callback) {
+    const sa = new SimulatedAnnealing(distanceMatrix, hospitals);
+    
+    sa.setParameters({
+        initialTemperature: parseFloat(document.getElementById("saInitialTemp").value),
+        finalTemperature: parseFloat(document.getElementById("saFinalTemp").value),
+        coolingRate: parseFloat(document.getElementById("saCoolingRate").value),
+        iterationsPerTemp: parseInt(document.getElementById("saIterationsPerTemp").value),
+        coolingSchedule: document.getElementById("saCoolingSchedule").value,
+        reheating: document.getElementById("saReheating").checked,
+        reheatThreshold: parseInt(document.getElementById("saReheatThreshold").value),
+        earlyStopEnabled: document.getElementById("saEarlyStop").checked
+    });
+    
+    const result = await sa.run(callback);
+    
+    // Adjust tour to start from selected hospital
+    result.bestTour = adjustTourStart(result.bestTour, startHospitalId);
+    
+    // Convert cost history to match GA format
+    result.fitnessHistory = result.costHistory;
+    result.avgFitnessHistory = [];
+    
+    return result;
+}
+
+async function runDifferentialEvolution(startHospitalId, callback) {
+    const de = new DifferentialEvolution(distanceMatrix, hospitals);
+    
+    de.setParameters({
+        populationSize: parseInt(document.getElementById("dePopulation").value),
+        generations: parseInt(document.getElementById("deGenerations").value),
+        F: parseFloat(document.getElementById("deMutationFactor").value),
+        CR: parseFloat(document.getElementById("deCrossoverProb").value),
+        strategy: document.getElementById("deStrategy").value,
+        crossoverType: document.getElementById("deCrossoverType").value,
+        selfAdaptive: document.getElementById("deSelfAdaptive").checked
+    });
+    
+    const result = await de.run(callback);
+    
+    // Adjust tour to start from selected hospital
+    result.bestTour = adjustTourStart(result.bestTour, startHospitalId);
+    
+    return result;
+}
+
+async function runTSPOptimization() {
+    const algorithm = document.getElementById("algorithmSelect").value;
+    const startHospitalId = parseInt(document.getElementById("startHospital").value);
+    const useSeed = document.getElementById("useSeed").checked;
+    const seedValue = document.getElementById("globalSeed").value;
+    
+    // Show loading
+    showLoading(true);
+    
+    // Initialize visualizers if not yet created
+    if (!tspVisualizer) {
+        tspVisualizer = new TSPVisualizer("tspTourCanvas", hospitals, distanceMatrix);
+    }
+    if (!convergenceChart) {
+        convergenceChart = new ConvergenceChart("tspConvergenceCanvas");
+    }
+    
+    let seeded = false;
+    let usedSeed = null;
     try {
-        const mode = document.getElementById("locationMode").value;
-        const targetSelect = document.getElementById("targetRS");
-        const target = parseInt(targetSelect.value);
-
-        if (isNaN(target) || target < 0) {
-            showNotification("Silakan pilih RS tujuan!", "error");
-            return;
+        let result;
+        const startTime = performance.now();
+        if (useSeed) {
+            usedSeed = applySeed(seedValue || 'default');
+            seeded = true;
         }
-
-        // Mode lokasi custom
-        if (mode === 'custom') {
-            if (!customLocation) {
-                showNotification("Silakan pilih lokasi awal terlebih dahulu (klik peta atau pilih preset)!", "error");
-                return;
+        
+        // Progress callback
+        const progressCallback = async (progress) => {
+            if (progress.generation && progress.generation % 50 === 0) {
+                console.log(`Generation ${progress.generation}: Best = ${(progress.bestFitness / 1000).toFixed(2)} km, Diversity = ${progress.diversity?.toFixed(4) || 'N/A'}`);
             }
-            
-            calculateRouteFromCustom(target);
-            return;
-        }
-
-        // Mode antar RS (original logic)
-        const fromSelect = document.getElementById("fromLocation");
-        const from = parseInt(fromSelect.value);
-
-        if (isNaN(from)) {
-            showNotification("Silakan pilih RS asal!", "error");
-            return;
-        }
-
-        if (from === target) {
-            showNotification("RS asal dan tujuan tidak boleh sama!", "error");
-            return;
-        }
-
-        showLoading(true);
-
-        const n = distanceMatrix.length;
-
-        const distCopy = distanceMatrix.map(row =>
-            row.map(val => val === 0 ? 0 : (val > 0 ? val : Infinity))
-        );
-
-        const durCopy = durationMatrix.map(row =>
-            row.map(val => val === 0 ? 0 : (val > 0 ? val : Infinity))
-        );
-
-        const distResult = floydWarshall(distCopy);
-        const durResult = floydWarshall(durCopy);
-
-        // Save results for matrix visualization
-        floydWarshallResult = {
-            distance: distResult,
-            duration: durResult
         };
-
-        let path = reconstructPath(distResult.next, from, target);
-
-        if (path.length < 2) {
-            showLoading(false);
-            showNotification("Tidak ada rute ditemukan!", "error");
-            return;
+        
+        if (algorithm === "ga") {
+            result = await runGeneticAlgorithm(startHospitalId, progressCallback);
+        } else if (algorithm === "sa") {
+            result = await runSimulatedAnnealing(startHospitalId, progressCallback);
+        } else if (algorithm === "de") {
+            result = await runDifferentialEvolution(startHospitalId, progressCallback);
         }
-
-        fetchRealRoute(path, distResult.dist, durResult.dist);
-
-    } catch (error) {
+        if (seeded) {
+            result.seed = usedSeed;
+            restoreRandom();
+            seeded = false;
+        }
+        
+        const endTime = performance.now();
+        const executionTime = endTime - startTime;
+        
         showLoading(false);
-        showNotification(`Error: ${error.message}`, "error");
-        console.error("Error calculating route:", error);
+        displayTSPResults(result, algorithm, executionTime);
+        
+    } catch (error) {
+        if (seeded) {
+            restoreRandom();
+            seeded = false;
+        }
+        showLoading(false);
+        showNotification("Error: " + error.message, "error");
+        console.error("Error running TSP:", error);
     }
 }
 
-async function fetchRealRoute(path, distMatrix, durMatrix) {
-    try {
-        const coordinates = path.map(idx => {
-            let h = hospitals.find(x => x.id === idx);
-            return [h.lng, h.lat];
-        });
-
-        const response = await fetch("/api/route", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({ coordinates })
-        });
-
-        if (!response.ok) {
-            throw new Error("Gagal mendapatkan rute dari server");
-        }
-
-        const data = await response.json();
-
-        if (data.type === "success" && data.geometry) {
-            const coords = data.geometry.coordinates.map(coord => [coord[1], coord[0]]);
-
-            if (polylineLayer) polylineLayer.remove();
-
-            polylineLayer = L.polyline(coords, {
-                color: "#2196f3",
-                weight: 5,
-                opacity: 0.7
-            }).addTo(map);
-
-            map.fitBounds(polylineLayer.getBounds());
-
-            displayRouteInfo(path, distMatrix, durMatrix);
-            
-            // Set flag bahwa rute sudah dihitung
-            isRouteCalculated = true;
-            
-            // Highlight path in graph visualization
-            if (window.graphVisualizer) {
-                highlightPathInGraph(path);
-            }
-
-            showLoading(false);
-            showNotification("Rute tercepat berhasil dihitung!", "success");
-        } else {
-            throw new Error("Format rute tidak valid");
-        }
-
-    } catch (error) {
-        showLoading(false);
-        showNotification(`Error: ${error.message}`, "error");
-        console.error("Error fetching real route:", error);
-    }
-}
-
-function displayRouteInfo(path, distMatrix, durMatrix) {
-    const routeInfoEl = document.getElementById("routeInfo");
-    const routeDetailsEl = document.getElementById("routeDetails");
-
-    let html = "";
-    let totalDist = 0;
-    let totalDur = 0;
-
-    for (let i = 0; i < path.length - 1; i++) {
-        const fromIdx = path[i];
-        const toIdx = path[i + 1];
-
-        const segmentDist = distMatrix[fromIdx][toIdx];
-        const segmentDur = durMatrix[fromIdx][toIdx];
-
-        totalDist += segmentDist;
-        totalDur += segmentDur;
-
-        const fromLoc = allLocations.find(loc => loc.id === fromIdx);
-        const toLoc = allLocations.find(loc => loc.id === toIdx);
-
-        html += `
-            <div class="route-step">
-                <strong>Langkah ${i + 1}</strong><br>
-                Dari: <b>${fromLoc.name}</b><br>
-                Ke: <b>${toLoc.name}</b><br>
-                Jarak: ${(segmentDist / 1000).toFixed(2)} km<br>
-                Waktu: ${Math.round(segmentDur / 60)} menit
-            </div>
-        `;
-    }
-
-    html += `
-        <div class="route-total">
-            <div>📍 Total Jarak: <span style="color: #1976d2">${(totalDist / 1000).toFixed(2)} km</span></div>
-            <div>⏱️ Estimasi Waktu: <span style="color: #1976d2">${Math.round(totalDur / 60)} menit</span></div>
-            <div>🏥 Jumlah Perhentian: <span style="color: #1976d2">${path.length - 2}</span></div>
+function displayTSPResults(result, algorithm, executionTime) {
+    const resultsModal = document.getElementById("resultsModal");
+    const statsDiv = document.getElementById("tspResultStats");
+    const comparisonDiv = document.getElementById("tspComparison");
+    
+    resultsModal.classList.remove("hidden");
+    comparisonDiv.classList.add("hidden");
+    
+    // Store result for export
+    comparisonResults.lastResult = { ...result, algorithm, executionTime };
+    document.getElementById("btnExportResults").disabled = false;
+    
+    // Display statistics
+    const algorithmNames = {
+        'ga': 'Genetic Algorithm',
+        'sa': 'Simulated Annealing',
+        'de': 'Differential Evolution'
+    };
+    
+    let statsHTML = `
+        <div class="stat-item">
+            <div class="stat-label">Algoritma</div>
+            <div class="stat-value">${algorithmNames[algorithm]}</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-label">Jarak Total</div>
+            <div class="stat-value">${(result.bestDistance / 1000).toFixed(2)} km</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-label">Waktu Eksekusi</div>
+            <div class="stat-value">${executionTime.toFixed(0)} ms</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-label">Iterasi/Generasi</div>
+            <div class="stat-value">${result.iterations || result.generations}</div>
         </div>
     `;
 
-    routeDetailsEl.innerHTML = html;
-    routeInfoEl.classList.remove("hidden");
+    if (result.seed !== undefined && result.seed !== null) {
+        statsHTML += `
+        <div class="stat-item">
+            <div class="stat-label">Seed</div>
+            <div class="stat-value">${result.seed}</div>
+        </div>`;
+    }
+    
+    // Add GA-specific statistics
+    if (algorithm === 'ga' && result.stats) {
+        statsHTML += `
+            <div class="stat-item">
+                <div class="stat-label">Improvement</div>
+                <div class="stat-value">${result.stats.improvementPercent}%</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Convergence Gen</div>
+                <div class="stat-value">${result.stats.convergenceGeneration}</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Total Crossovers</div>
+                <div class="stat-value">${result.stats.totalCrossovers}</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Total Mutations</div>
+                <div class="stat-value">${result.stats.totalMutations}</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Local Searches</div>
+                <div class="stat-value">${result.stats.totalLocalSearches}</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Diversity Restarts</div>
+                <div class="stat-value">${result.stats.diversityRestarts}</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Final Diversity</div>
+                <div class="stat-value">${result.stats.finalDiversity}</div>
+            </div>
+        `;
+    }
+    
+    statsDiv.innerHTML = statsHTML;
+    
+    // Visualize tour
+    tspVisualizer.drawTour(result.bestTour, result.bestDistance, algorithmNames[algorithm]);
+    
+    // Visualize convergence
+    convergenceChart.updateData(
+        result.fitnessHistory,
+        result.avgFitnessHistory,
+        `Konvergensi ${algorithmNames[algorithm]}`
+    );
+    
+    // Draw on map
+    drawTourOnMap(result.bestTour);
+    
+    showNotification(`Optimasi selesai! Jarak: ${(result.bestDistance / 1000).toFixed(2)} km`, "success");
 }
 
-function resetRoute() {
+async function compareAllAlgorithms() {
+    const startHospitalId = parseInt(document.getElementById("startHospital").value);
+    const useSeed = document.getElementById("useSeed").checked;
+    const seedValue = document.getElementById("globalSeed").value;
+    
+    const resultsModal = document.getElementById("resultsModal");
+    const comparisonDiv = document.getElementById("tspComparison");
+    
+    resultsModal.classList.remove("hidden");
+    comparisonDiv.classList.remove("hidden");
+    
+    const tbody = document.getElementById("tspComparisonBody");
+    tbody.innerHTML = `
+        <tr>
+            <td>Genetic Algorithm</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td><span class="status-badge status-running">Running...</span></td>
+        </tr>
+        <tr>
+            <td>Simulated Annealing</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td><span class="status-badge status-running">Waiting...</span></td>
+        </tr>
+        <tr>
+            <td>Differential Evolution</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td><span class="status-badge status-running">Waiting...</span></td>
+        </tr>
+    `;
+    
+    comparisonResults = {};
+    
+    // Run GA
+    try {
+        showLoading(true);
+        const startTime = performance.now();
+        let seeded = false; let seedGA = null;
+        if (useSeed) { seedGA = applySeed(seedValue || 'default'); seeded = true; }
+        const gaResult = await runGeneticAlgorithm(startHospitalId, null);
+        if (seeded) { gaResult.seed = seedGA; restoreRandom(); }
+        const endTime = performance.now();
+        
+        comparisonResults.ga = {
+            distance: gaResult.bestDistance,
+            time: endTime - startTime,
+            iterations: gaResult.generations,
+            tour: gaResult.bestTour,
+            seed: gaResult.seed
+        };
+        
+        updateComparisonRow(0, comparisonResults.ga, 'completed');
+    } catch (error) {
+        updateComparisonRow(0, null, 'error');
+    }
+    
+    // Run SA
+    try {
+        const startTime = performance.now();
+        let seeded = false; let seedSA = null;
+        if (useSeed) { seedSA = applySeed(seedValue || 'default'); seeded = true; }
+        const saResult = await runSimulatedAnnealing(startHospitalId, null);
+        if (seeded) { saResult.seed = seedSA; restoreRandom(); }
+        const endTime = performance.now();
+        
+        comparisonResults.sa = {
+            distance: saResult.bestDistance,
+            time: endTime - startTime,
+            iterations: saResult.iterations,
+            tour: saResult.bestTour,
+            seed: saResult.seed
+        };
+        
+        updateComparisonRow(1, comparisonResults.sa, 'completed');
+    } catch (error) {
+        updateComparisonRow(1, null, 'error');
+    }
+    
+    // Run DE
+    try {
+        const startTime = performance.now();
+        let seeded = false; let seedDE = null;
+        if (useSeed) { seedDE = applySeed(seedValue || 'default'); seeded = true; }
+        const deResult = await runDifferentialEvolution(startHospitalId, null);
+        if (seeded) { deResult.seed = seedDE; restoreRandom(); }
+        const endTime = performance.now();
+        
+        comparisonResults.de = {
+            distance: deResult.bestDistance,
+            time: endTime - startTime,
+            iterations: deResult.generations,
+            tour: deResult.bestTour,
+            seed: deResult.seed
+        };
+        
+        updateComparisonRow(2, comparisonResults.de, 'completed');
+        showLoading(false);
+        
+        // Show best result on map
+        const bestAlgo = Object.keys(comparisonResults).reduce((a, b) => 
+            comparisonResults[a].distance < comparisonResults[b].distance ? a : b
+        );
+        drawTourOnMap(comparisonResults[bestAlgo].tour);
+        
+        showNotification("Perbandingan selesai! Lihat tabel hasil.", "success");
+    } catch (error) {
+        updateComparisonRow(2, null, 'error');
+        showLoading(false);
+    }
+}
+
+function updateComparisonRow(rowIndex, result, status) {
+    const tbody = document.getElementById("tspComparisonBody");
+    const row = tbody.rows[rowIndex];
+    
+    if (result) {
+        row.cells[1].textContent = (result.distance / 1000).toFixed(2);
+        row.cells[2].textContent = result.time.toFixed(0);
+        row.cells[3].textContent = result.iterations;
+    } else {
+        row.cells[1].textContent = '-';
+        row.cells[2].textContent = '-';
+        row.cells[3].textContent = '-';
+    }
+    
+    const statusBadge = row.cells[4].querySelector('.status-badge');
+    statusBadge.className = `status-badge status-${status}`;
+    statusBadge.textContent = status === 'completed' ? 'Selesai' : (status === 'error' ? 'Error' : 'Running...');
+}
+
+function showParameters(algorithm) {
+    document.getElementById("tspParametersGA").classList.add("hidden");
+    document.getElementById("tspParametersSA").classList.add("hidden");
+    document.getElementById("tspParametersDE").classList.add("hidden");
+    
+    if (algorithm === "ga") {
+        document.getElementById("tspParametersGA").classList.remove("hidden");
+    } else if (algorithm === "sa") {
+        document.getElementById("tspParametersSA").classList.remove("hidden");
+    } else if (algorithm === "de") {
+        document.getElementById("tspParametersDE").classList.remove("hidden");
+    }
+}
+
+function resetMap() {
     if (polylineLayer) {
         polylineLayer.remove();
         polylineLayer = null;
     }
-    
-    if (customLocationMarker) {
-        customLocationMarker.remove();
-        customLocationMarker = null;
-    }
-    
-    customLocation = null;
-    isRouteCalculated = false; // Reset flag
-
-    document.getElementById("routeInfo").classList.add("hidden");
-    document.getElementById("locationMode").value = "hospital";
-    document.getElementById("fromLocation").value = "0";
-    document.getElementById("targetRS").value = "";
-    document.getElementById("customAddress").value = "";
-    document.getElementById("customLocationInfo").classList.add("hidden");
-    document.getElementById("addressHelpText").classList.add("hidden");
-    document.getElementById("hospitalModeControls").classList.remove("hidden");
-    document.getElementById("customModeControls").classList.add("hidden");
-    
-    // Clear graph highlight
-    if (window.graphVisualizer) {
-        window.graphVisualizer.clearHighlight();
-    }
-
-    if (hospitalMarkers.length > 0) {
-        const group = L.featureGroup(hospitalMarkers);
-        map.fitBounds(group.getBounds(), { padding: [50, 50] });
-    }
-    
-    showNotification("Rute telah direset.", "info");
-
-    showNotification("Rute telah direset", "info");
+    map.setView([-10.16, 123.61], 12);
+    comparisonResults = {};
+    document.getElementById("btnExportResults").disabled = true;
+    showNotification("Peta direset", "info");
 }
 
-function getLocationName(id) {
-    const loc = allLocations.find(l => l.id === id);
-    return loc ? loc.name : `Lokasi ${id}`;
-}
-
-function showMatrixModal() {
-    if (!floydWarshallResult && !isRouteCalculated) {
-        showNotification("Hitung rute terlebih dahulu untuk melihat matriks!", "error");
-        return;
-    }
-
-    const modal = document.getElementById("matrixModal");
-    modal.classList.remove("hidden");
-
-    // Default: show distance matrix
-    renderMatrix("distance");
-}
-
-function showAllPairsModal() {
-    if (!floydWarshallResult && !isRouteCalculated) {
-        showNotification("Hitung rute terlebih dahulu untuk melihat semua jalur!", "error");
-        return;
-    }
-
-    const modal = document.getElementById("allPairsModal");
-    modal.classList.remove("hidden");
-
-    // Default: show distance table
-    renderAllPairsTable("distance");
-}
-
-function renderMatrix(type) {
-    const container = document.getElementById("matrixContainer");
-    const result = floydWarshallResult[type];
-    const originalMatrix = type === "distance" ? originalDistanceMatrix : originalDurationMatrix;
-    const unit = type === "distance" ? "km" : "min";
-    const divisor = type === "distance" ? 1000 : 60;
-
-    let html = '<div class="matrix-wrapper"><h4>Matriks Hasil Floyd-Warshall</h4>';
-    html += '<table class="matrix-table"><thead><tr><th>Dari \\ Ke</th>';
-
-    // Header columns
-    allLocations.forEach(loc => {
-        html += `<th title="${loc.name}">${loc.id}</th>`;
-    });
-    html += '</tr></thead><tbody>';
-
-    // Rows
-    allLocations.forEach((fromLoc, i) => {
-        html += `<tr><th title="${fromLoc.name}">${fromLoc.id}</th>`;
-        allLocations.forEach((toLoc, j) => {
-            const value = result.dist[i][j];
-            const originalValue = originalMatrix[i][j];
-            const isChanged = result.changes[i][j];
-            const displayValue = value === Infinity ? '∞' : (value / divisor).toFixed(2);
-
-            let cellClass = '';
-            if (i === j) {
-                cellClass = 'diagonal';
-            } else if (isChanged) {
-                cellClass = 'indirect';
-            } else if (value < Infinity) {
-                cellClass = 'direct';
-            }
-
-            let title = `${fromLoc.name} → ${toLoc.name}: ${displayValue} ${unit}`;
-            if (isChanged) {
-                const origDisplay = (originalValue / divisor).toFixed(2);
-                title += `\nAsli: ${origDisplay} ${unit}\nDioptimalkan via jalur tidak langsung`;
-            }
-
-            html += `<td class="${cellClass}" title="${title}">${displayValue}</td>`;
-        });
-        html += '</tr>';
-    });
-
-    html += '</tbody></table></div>';
-
-    // Location legend
-    html += '<div class="location-legend"><h4>Keterangan Lokasi:</h4>';
-    allLocations.forEach(loc => {
-        html += `<div><strong>${loc.id}:</strong> ${loc.name}</div>`;
-    });
-    html += '</div>';
-
-    container.innerHTML = html;
-}
-
-function renderAllPairsTable(type) {
-    const container = document.getElementById("allPairsContainer");
-    const result = floydWarshallResult[type];
-    const unit = type === "distance" ? "km" : "menit";
-    const divisor = type === "distance" ? 1000 : 60;
-
-    let html = '<table class="all-pairs-table">';
-    html += '<thead><tr>';
-    html += '<th>Dari</th><th>Ke</th><th>Jarak/Waktu</th><th>Jalur</th><th>Tipe</th>';
-    html += '</tr></thead><tbody>';
-
-    // Generate all pairs
-    allLocations.forEach((fromLoc, i) => {
-        allLocations.forEach((toLoc, j) => {
-            if (i !== j) {
-                const value = result.dist[i][j];
-                if (value < Infinity) {
-                    const displayValue = (value / divisor).toFixed(2);
-                    const path = reconstructPath(result.next, i, j);
-                    const pathNames = path.map(id => {
-                        const loc = allLocations.find(l => l.id === id);
-                        return `${loc.name} (${id})`;
-                    }).join(' → ');
-
-                    const isChanged = result.changes[i][j];
-                    const routeType = isChanged ?
-                        '<span class="badge indirect-badge">Tidak Langsung</span>' :
-                        '<span class="badge direct-badge">Langsung</span>';
-
-                    html += `<tr>`;
-                    html += `<td>${fromLoc.name}</td>`;
-                    html += `<td>${toLoc.name}</td>`;
-                    html += `<td><strong>${displayValue}</strong> ${unit}</td>`;
-                    html += `<td class="path-cell">${pathNames}</td>`;
-                    html += `<td>${routeType}</td>`;
-                    html += `</tr>`;
-                }
-            }
-        });
-    });
-
-    html += '</tbody></table>';
-    container.innerHTML = html;
-}
-
-function closeMatrixModal() {
-    document.getElementById("matrixModal").classList.add("hidden");
-}
-
-function closeAllPairsModal() {
-    document.getElementById("allPairsModal").classList.add("hidden");
-}
-
-function showGraphModal() {
-    if (!floydWarshallResult && !isRouteCalculated) {
-        showNotification("Hitung rute terlebih dahulu untuk melihat graf!", "error");
+// Export results to JSON/CSV/PNG
+function exportResults() {
+    if (!comparisonResults.lastResult) {
+        showNotification("Tidak ada hasil untuk di-export", "error");
         return;
     }
     
-    showGraphVisualization(hospitals, floydWarshallResult.distance.dist, 'weighted');
-}
-
-// Geocoding function menggunakan Nominatim (OpenStreetMap)
-async function geocodeAddress(address) {
-    try {
-        showLoading(true);
-        
-        // Tambahkan "Kota Kupang, NTT, Indonesia" jika belum ada
-        let fullAddress = address;
-        if (!address.toLowerCase().includes('kupang')) {
-            fullAddress = `${address}, Kota Kupang, NTT, Indonesia`;
-        }
-        
-        console.log("Mencari alamat:", fullAddress);
-        
-        // Nominatim Geocoding API (OpenStreetMap)
-        // Bounded search untuk area Kupang: lat -10.0 to -10.3, lon 123.5 to 123.7
-        const url = `https://nominatim.openstreetmap.org/search?` +
-                    `q=${encodeURIComponent(fullAddress)}` +
-                    `&format=json` +
-                    `&limit=5` +
-                    `&addressdetails=1` +
-                    `&countrycodes=id`;
-        
-        console.log("URL Geocoding:", url);
-        
-        const response = await fetch(url, {
-            headers: {
-                'Accept': 'application/json',
-                'User-Agent': 'GIS-RS-Kupang-Routing-App/1.0 (Educational Project)'
-            }
-        });
-        
-        console.log("Response status:", response.status);
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error("Error response:", errorText);
-            throw new Error(`Geocoding gagal (${response.status}). Silakan coba lagi.`);
-        }
-        
-        const data = await response.json();
-        console.log("Data geocoding:", data);
-        
-        if (!data || data.length === 0) {
-            throw new Error('Alamat tidak ditemukan. Coba gunakan nama landmark (contoh: "Flobamora Mall") atau nama jalan utama.');
-        }
-        
-        // Ambil hasil pertama
-        const result = data[0];
-        const lat = parseFloat(result.lat);
-        const lng = parseFloat(result.lon);
-        const foundName = result.display_name || address;
-        
-        console.log("Koordinat ditemukan:", lat, lng);
-        
-        // Validasi koordinat dalam area Kupang (lebih fleksibel)
-        if (lat < -10.5 || lat > -9.8 || lng < 123.3 || lng > 124.0) {
-            console.warn("Koordinat di luar area Kupang:", lat, lng);
-            throw new Error('Lokasi ditemukan di luar area Kota Kupang. Pastikan alamat benar.');
-        }
-        
-        showLoading(false);
-        return { lat, lng, name: foundName, originalAddress: address };
-        
-    } catch (error) {
-        showLoading(false);
-        console.error("Geocoding error:", error);
-        throw error;
-    }
-}
-
-function setCustomLocationFromClick(lat, lng) {
-    customLocation = { lat, lng, name: `Lokasi Custom (${lat.toFixed(5)}, ${lng.toFixed(5)})` };
+    const result = comparisonResults.lastResult;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     
-    // Hapus marker lama jika ada
-    if (customLocationMarker) {
-        customLocationMarker.remove();
-    }
-    
-    // Tambah marker baru
-    const customIcon = L.icon({
-        iconUrl: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMCIgaGVpZ2h0PSI0MCIgdmlld0JveD0iMCAwIDMwIDQwIj48cGF0aCBmaWxsPSIjZmY1NzIyIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMiIgZD0iTTE1IDAgQyA4IDAgMyA1IDMgMTIgQyAzIDE4IDguNSAyNSAxNSA0MCBDIDIxLjUgMjUgMjcgMTggMjcgMTIgQyAyNyA1IDIyIDAgMTUgMCBaIE0gMTUgMTcgQyAxMiAxNyAxMCAxNSAxMCAxMiBDIDEwIDkgMTIgNyAxNSA3IEMgMTggNyAyMCA5IDIwIDEyIEMgMjAgMTUgMTggMTcgMTUgMTcgWiIvPjwvc3ZnPg==',
-        iconSize: [30, 40],
-        iconAnchor: [15, 40],
-        popupAnchor: [0, -40]
-    });
-    
-    customLocationMarker = L.marker([lat, lng], { icon: customIcon })
-        .addTo(map)
-        .bindPopup(`<b>Lokasi Awal Anda</b><br>${customLocation.name}`)
-        .openPopup();
-    
-    // Update info
-    document.getElementById('customLocationInfo').classList.remove('hidden');
-    document.getElementById('customLocationName').textContent = customLocation.name;
-    
-    showNotification("Lokasi custom berhasil ditandai! Pilih RS tujuan dan klik Hitung Rute.", "success");
-}
-
-function setPresetLocation(presetKey) {
-    const preset = presetLocations[presetKey];
-    if (preset) {
-        setCustomLocationFromClick(preset.lat, preset.lng);
-        customLocation.name = preset.name;
-        document.getElementById('customLocationName').textContent = preset.name;
-    }
-}
-
-async function calculateRouteFromCustom(targetRSId) {
-    try {
-        showLoading(true);
-        
-        // Ambil koordinat target RS
-        const targetRS = hospitals.find(h => h.id === targetRSId);
-        if (!targetRS) {
-            throw new Error("RS tujuan tidak ditemukan");
-        }
-        
-        // Request ke ORS untuk rute langsung dari custom location ke target RS
-        const coordinates = [
-            [customLocation.lng, customLocation.lat],
-            [targetRS.lng, targetRS.lat]
-        ];
-        
-        const response = await fetch("/api/route", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ coordinates })
-        });
-        
-        if (!response.ok) {
-            throw new Error("Gagal mendapatkan rute dari server");
-        }
-        
-        const data = await response.json();
-        
-        if (data.type === "success" && data.geometry) {
-            const coords = data.geometry.coordinates.map(coord => [coord[1], coord[0]]);
-            
-            if (polylineLayer) polylineLayer.remove();
-            
-            polylineLayer = L.polyline(coords, {
-                color: "#2196f3",
-                weight: 5,
-                opacity: 0.7
-            }).addTo(map);
-            
-            map.fitBounds(polylineLayer.getBounds());
-            
-            // Hitung jarak dan waktu dari geometry
-            let totalDistance = 0;
-            for (let i = 0; i < data.geometry.coordinates.length - 1; i++) {
-                const [lng1, lat1] = data.geometry.coordinates[i];
-                const [lng2, lat2] = data.geometry.coordinates[i + 1];
-                totalDistance += getDistanceFromLatLng(lat1, lng1, lat2, lng2);
-            }
-            
-            // Estimasi waktu (asumsi 40 km/jam)
-            const estimatedTime = (totalDistance / 1000) / 40 * 60; // menit
-            
-            displayCustomRouteInfo(customLocation, targetRS, totalDistance, estimatedTime);
-            
-            // Set flag bahwa rute sudah dihitung
-            isRouteCalculated = true;
-            
-            showLoading(false);
-            showNotification("Rute dari lokasi Anda berhasil dihitung!", "success");
-        } else {
-            throw new Error("Format rute tidak valid");
-        }
-        
-    } catch (error) {
-        showLoading(false);
-        showNotification(`Error: ${error.message}`, "error");
-        console.error("Error calculating custom route:", error);
-    }
-}
-
-function getDistanceFromLatLng(lat1, lng1, lat2, lng2) {
-    const R = 6371000; // Radius bumi dalam meter
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLng = (lng2 - lng1) * Math.PI / 180;
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLng/2) * Math.sin(dLng/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
-}
-
-function displayCustomRouteInfo(from, to, distance, duration) {
-    const routeInfoEl = document.getElementById("routeInfo");
-    const routeDetailsEl = document.getElementById("routeDetails");
-    
-    let html = `
-        <div class="route-step">
-            <strong>Rute Langsung</strong><br>
-            Dari: <b>${from.name}</b><br>
-            Ke: <b>${to.name}</b><br>
-            Jarak: ${(distance / 1000).toFixed(2)} km<br>
-            Estimasi Waktu: ${Math.round(duration)} menit
-        </div>
-        <div class="route-total">
-            <div>📍 Total Jarak: <span style="color: #1976d2">${(distance / 1000).toFixed(2)} km</span></div>
-            <div>⏱️ Estimasi Waktu: <span style="color: #1976d2">${Math.round(duration)} menit</span></div>
-            <div>🏥 RS Tujuan: <span style="color: #1976d2">${to.name}</span></div>
+    // Export modal
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.style.display = 'block';
+    modal.innerHTML = `
+        <div class="modal-content">
+            <span class="close-modal" onclick="this.parentElement.parentElement.remove()">&times;</span>
+            <h3>Export Hasil Optimasi</h3>
+            <div style="margin: 20px 0;">
+                <h4>Data Export</h4>
+                <button onclick="exportJSON()" class="btn-primary">Export JSON</button>
+                <button onclick="exportCSV()" class="btn-success">Export CSV Tour</button>
+                <button onclick="exportFullCSV()" class="btn-info">Export Full CSV</button>
+                <hr style="margin: 15px 0;">
+                <h4>Image Export</h4>
+                <button onclick="exportTourPNG()" class="btn-primary">Export Tour PNG</button>
+                <button onclick="exportConvergencePNG()" class="btn-success">Export Convergence PNG</button>
+            </div>
         </div>
     `;
-    
-    routeDetailsEl.innerHTML = html;
-    routeInfoEl.classList.remove("hidden");
+    document.body.appendChild(modal);
 }
 
-document.addEventListener("DOMContentLoaded", async () => {
-    initMap();
-    await loadDataset();
-
-    document.getElementById("btnHitung").onclick = hitungRuteTercepat;
-    document.getElementById("btnReset").onclick = resetRoute;
-    document.getElementById("btnShowMatrix").onclick = showMatrixModal;
-    document.getElementById("btnShowAllPairs").onclick = showAllPairsModal;
-    document.getElementById("btnShowGraph").onclick = showGraphModal;
-    document.getElementById("closeMatrix").onclick = closeMatrixModal;
-    document.getElementById("closeAllPairs").onclick = closeAllPairsModal;
-    document.getElementById("closeGraph").onclick = closeGraphModal;
+function exportJSON() {
+    const result = comparisonResults.lastResult;
+    const exportData = {
+        algorithm: result.algorithm,
+        timestamp: new Date().toISOString(),
+        seed: result.seed ?? null,
+        bestDistance: result.bestDistance,
+        executionTime: result.executionTime,
+        tour: result.bestTour.map(id => {
+            const h = hospitals.find(x => x.id === id);
+            return {
+                id: h.id,
+                name: h.name,
+                lat: h.lat,
+                lng: h.lng
+            };
+        }),
+        statistics: result.stats || {},
+        fitnessHistory: result.fitnessHistory,
+        diversityHistory: result.diversityHistory || []
+    };
     
-    // Location mode switching
-    document.getElementById("locationMode").addEventListener("change", function(e) {
-        const mode = e.target.value;
-        const hospitalControls = document.getElementById("hospitalModeControls");
-        const customControls = document.getElementById("customModeControls");
-        const helpText = document.getElementById("addressHelpText");
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tsp_result_${result.algorithm}_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    showNotification("Data berhasil di-export sebagai JSON", "success");
+}
+
+function exportCSV() {
+    const result = comparisonResults.lastResult;
+    let csv = "No,Hospital_ID,Hospital_Name,Latitude,Longitude,Road_Class\n";
+    
+    result.bestTour.forEach((id, index) => {
+        const h = hospitals.find(x => x.id === id);
+        csv += `${index + 1},${h.id},${h.name},${h.lat},${h.lng},${h.road_class}\n`;
+    });
+    
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tsp_tour_${result.algorithm}_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    showNotification("Tour berhasil di-export sebagai CSV", "success");
+}
+
+function exportFullCSV() {
+    const result = comparisonResults.lastResult;
+    let csv = "Generation,Best_Fitness,Avg_Fitness,Diversity\n";
+    
+    for (let i = 0; i < result.fitnessHistory.length; i++) {
+        const best = result.fitnessHistory[i];
+        const avg = result.avgFitnessHistory ? result.avgFitnessHistory[i] : '';
+        const div = result.diversityHistory ? result.diversityHistory[i] : '';
+        csv += `${i},${best},${avg},${div}\n`;
+    }
+    
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tsp_convergence_${result.algorithm}_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    showNotification("Data konvergensi berhasil di-export sebagai CSV", "success");
+}
+
+function exportTourPNG() {
+    const canvas = document.getElementById('tspTourCanvas');
+    if (!canvas) {
+        showNotification("Canvas tidak tersedia", "error");
+        return;
+    }
+    
+    const link = document.createElement('a');
+    link.download = `tsp_tour_${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+    
+    showNotification("Tour diagram berhasil di-export sebagai PNG", "success");
+}
+
+function exportConvergencePNG() {
+    const canvas = document.getElementById('tspConvergenceCanvas');
+    if (!canvas) {
+        showNotification("Canvas tidak tersedia", "error");
+        return;
+    }
+    
+    const link = document.createElement('a');
+    link.download = `tsp_convergence_${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+    
+    showNotification("Grafik konvergensi berhasil di-export sebagai PNG", "success");
+}
+
+// Benchmark functionality
+let benchmarkResults = [];
+
+function showBenchmarkModal() {
+    document.getElementById('benchmarkModal').style.display = 'block';
+}
+
+async function runBenchmark() {
+    const algorithm = document.getElementById('benchmarkAlgorithm').value;
+    const trials = parseInt(document.getElementById('benchmarkTrials').value);
+    const seedMode = document.getElementById('benchmarkSeedMode').value;
+    const useSeed = document.getElementById('useSeed').checked;
+    const baseSeed = document.getElementById('globalSeed').value;
+    
+    if (!hospitals || hospitals.length < 2) {
+        showNotification("Belum ada data RS atau data tidak cukup untuk benchmark", "error");
+        return;
+    }
+    
+    // Hide start button, show progress
+    document.getElementById('btnStartBenchmark').disabled = true;
+    document.getElementById('benchmarkProgress').style.display = 'block';
+    document.getElementById('benchmarkTotalTrials').textContent = trials;
+    
+    benchmarkResults = [];
+    
+    for (let i = 0; i < trials; i++) {
+        document.getElementById('benchmarkCurrentTrial').textContent = i + 1;
+        document.getElementById('benchmarkProgressBar').style.width = ((i + 1) / trials * 100) + '%';
         
-        if (mode === 'hospital') {
-            hospitalControls.classList.remove("hidden");
-            customControls.classList.add("hidden");
-            helpText.classList.add("hidden");
-            if (customLocationMarker) {
-                customLocationMarker.remove();
-                customLocationMarker = null;
+        // Determine seed for this trial
+        let trialSeed = null;
+        if (useSeed || seedMode === 'same') {
+            if (seedMode === 'same') {
+                trialSeed = baseSeed || 'benchmark';
+            } else {
+                trialSeed = (baseSeed || 'benchmark') + '_' + i;
             }
-            customLocation = null;
-            document.getElementById('customLocationInfo').classList.add('hidden');
-        } else {
-            hospitalControls.classList.add("hidden");
-            customControls.classList.remove("hidden");
-            helpText.classList.remove("hidden");
-        }
-    });
-    
-    // Geocode address button
-    document.getElementById("btnGeocodeAddress").addEventListener("click", async function() {
-        const addressInput = document.getElementById("customAddress");
-        const address = addressInput.value.trim();
-        
-        if (!address) {
-            showNotification("Silakan masukkan alamat terlebih dahulu!", "error");
-            return;
         }
         
-        try {
-            const location = await geocodeAddress(address);
-            setCustomLocationFromClick(location.lat, location.lng);
-            customLocation.name = location.name;
-            customLocation.originalAddress = location.originalAddress;
-            document.getElementById('customLocationName').textContent = location.name;
-            
-            showNotification("Alamat ditemukan! Pilih RS tujuan dan klik Hitung Rute.", "success");
-        } catch (error) {
-            showNotification(error.message, "error");
+        // Apply seed if needed
+        if (trialSeed) applySeed(trialSeed);
+        
+        // Run algorithm
+        let result;
+        const startTime = performance.now();
+        
+        if (algorithm === 'ga') {
+            result = await runGeneticAlgorithmInternal();
+        } else if (algorithm === 'sa') {
+            result = await runSimulatedAnnealingInternal();
+        } else if (algorithm === 'de') {
+            result = await runDifferentialEvolutionInternal();
         }
-    });
+        
+        const endTime = performance.now();
+        
+        // Restore random
+        if (trialSeed) restoreRandom();
+        
+        // Save trial result
+        benchmarkResults.push({
+            trial: i + 1,
+            seed: trialSeed,
+            bestDistance: result.bestDistance,
+            executionTime: endTime - startTime,
+            bestTour: result.bestTour
+        });
+        
+        // Small delay to allow UI update
+        await new Promise(resolve => setTimeout(resolve, 50));
+    }
     
-    // Enter key pada address input
-    document.getElementById("customAddress").addEventListener("keypress", function(e) {
-        if (e.key === 'Enter') {
-            document.getElementById("btnGeocodeAddress").click();
-        }
-    });
+    // Display results
+    displayBenchmarkResults(algorithm);
+    
+    // Reset UI
+    document.getElementById('btnStartBenchmark').disabled = false;
+    document.getElementById('benchmarkProgress').style.display = 'none';
+    document.getElementById('benchmarkModal').style.display = 'none';
+}
 
-    // Tab switching for matrix modal
-    document.querySelectorAll("#matrixModal .tab-btn").forEach(btn => {
-        btn.addEventListener("click", (e) => {
-            document.querySelectorAll("#matrixModal .tab-btn").forEach(b => b.classList.remove("active"));
-            e.target.classList.add("active");
-            renderMatrix(e.target.dataset.tab);
-        });
-    });
-
-    // Tab switching for all-pairs modal
-    document.querySelectorAll("#allPairsModal .tab-btn").forEach(btn => {
-        btn.addEventListener("click", (e) => {
-            document.querySelectorAll("#allPairsModal .tab-btn").forEach(b => b.classList.remove("active"));
-            e.target.classList.add("active");
-            renderAllPairsTable(e.target.dataset.tab);
-        });
-    });
-
-    // Close modal when clicking outside
-    window.onclick = function (event) {
-        const matrixModal = document.getElementById("matrixModal");
-        const allPairsModal = document.getElementById("allPairsModal");
-        if (event.target === matrixModal) {
-            closeMatrixModal();
-        }
-        if (event.target === allPairsModal) {
-            closeAllPairsModal();
+function displayBenchmarkResults(algorithm) {
+    const distances = benchmarkResults.map(r => r.bestDistance);
+    const times = benchmarkResults.map(r => r.executionTime);
+    
+    const stats = {
+        distance: {
+            mean: distances.reduce((a, b) => a + b) / distances.length,
+            median: median(distances),
+            std: standardDeviation(distances),
+            min: Math.min(...distances),
+            max: Math.max(...distances)
+        },
+        time: {
+            mean: times.reduce((a, b) => a + b) / times.length,
+            median: median(times),
+            std: standardDeviation(times),
+            min: Math.min(...times),
+            max: Math.max(...times)
         }
     };
+    
+    // Show results in modal
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.style.display = 'block';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 800px;">
+            <span class="close" onclick="this.parentElement.parentElement.remove()">&times;</span>
+            <h3>Benchmark Results - ${algorithm.toUpperCase()}</h3>
+            <p><strong>Trials:</strong> ${benchmarkResults.length}</p>
+            
+            <h4>Distance Statistics (km)</h4>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+                <tr><th style="border: 1px solid #ddd; padding: 8px;">Metric</th><th style="border: 1px solid #ddd; padding: 8px;">Value</th></tr>
+                <tr><td style="border: 1px solid #ddd; padding: 8px;">Mean</td><td style="border: 1px solid #ddd; padding: 8px;">${stats.distance.mean.toFixed(3)}</td></tr>
+                <tr><td style="border: 1px solid #ddd; padding: 8px;">Median</td><td style="border: 1px solid #ddd; padding: 8px;">${stats.distance.median.toFixed(3)}</td></tr>
+                <tr><td style="border: 1px solid #ddd; padding: 8px;">Std Dev</td><td style="border: 1px solid #ddd; padding: 8px;">${stats.distance.std.toFixed(3)}</td></tr>
+                <tr><td style="border: 1px solid #ddd; padding: 8px;">Min</td><td style="border: 1px solid #ddd; padding: 8px;">${stats.distance.min.toFixed(3)}</td></tr>
+                <tr><td style="border: 1px solid #ddd; padding: 8px;">Max</td><td style="border: 1px solid #ddd; padding: 8px;">${stats.distance.max.toFixed(3)}</td></tr>
+            </table>
+            
+            <h4>Execution Time Statistics (ms)</h4>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+                <tr><th style="border: 1px solid #ddd; padding: 8px;">Metric</th><th style="border: 1px solid #ddd; padding: 8px;">Value</th></tr>
+                <tr><td style="border: 1px solid #ddd; padding: 8px;">Mean</td><td style="border: 1px solid #ddd; padding: 8px;">${stats.time.mean.toFixed(2)}</td></tr>
+                <tr><td style="border: 1px solid #ddd; padding: 8px;">Median</td><td style="border: 1px solid #ddd; padding: 8px;">${stats.time.median.toFixed(2)}</td></tr>
+                <tr><td style="border: 1px solid #ddd; padding: 8px;">Std Dev</td><td style="border: 1px solid #ddd; padding: 8px;">${stats.time.std.toFixed(2)}</td></tr>
+                <tr><td style="border: 1px solid #ddd; padding: 8px;">Min</td><td style="border: 1px solid #ddd; padding: 8px;">${stats.time.min.toFixed(2)}</td></tr>
+                <tr><td style="border: 1px solid #ddd; padding: 8px;">Max</td><td style="border: 1px solid #ddd; padding: 8px;">${stats.time.max.toFixed(2)}</td></tr>
+            </table>
+            
+            <h4>Individual Trials</h4>
+            <div style="max-height: 300px; overflow-y: auto;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr><th style="border: 1px solid #ddd; padding: 8px;">Trial</th><th style="border: 1px solid #ddd; padding: 8px;">Distance (km)</th><th style="border: 1px solid #ddd; padding: 8px;">Time (ms)</th><th style="border: 1px solid #ddd; padding: 8px;">Seed</th></tr>
+                    ${benchmarkResults.map(r => `
+                        <tr>
+                            <td style="border: 1px solid #ddd; padding: 8px;">${r.trial}</td>
+                            <td style="border: 1px solid #ddd; padding: 8px;">${r.bestDistance.toFixed(3)}</td>
+                            <td style="border: 1px solid #ddd; padding: 8px;">${r.executionTime.toFixed(2)}</td>
+                            <td style="border: 1px solid #ddd; padding: 8px; font-size: 0.8em;">${r.seed || 'none'}</td>
+                        </tr>
+                    `).join('')}
+                </table>
+            </div>
+            
+            <div style="margin-top: 20px; text-align: center;">
+                <button onclick="exportBenchmarkCSV('${algorithm}')" class="btn-success">Export to CSV</button>
+                <button onclick="this.parentElement.parentElement.parentElement.remove()" class="btn-secondary">Close</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    
+    showNotification(`Benchmark selesai: ${benchmarkResults.length} trials`, "success");
+}
+
+function median(arr) {
+    const sorted = [...arr].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+function standardDeviation(arr) {
+    const mean = arr.reduce((a, b) => a + b) / arr.length;
+    const variance = arr.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / arr.length;
+    return Math.sqrt(variance);
+}
+
+function exportBenchmarkCSV(algorithm) {
+    let csv = "Trial,Distance_km,Time_ms,Seed\n";
+    benchmarkResults.forEach(r => {
+        csv += `${r.trial},${r.bestDistance},${r.executionTime},${r.seed || 'none'}\n`;
+    });
+    
+    // Add statistics summary
+    const distances = benchmarkResults.map(r => r.bestDistance);
+    const times = benchmarkResults.map(r => r.executionTime);
+    csv += "\nStatistics Summary\n";
+    csv += "Metric,Distance_km,Time_ms\n";
+    csv += `Mean,${(distances.reduce((a,b)=>a+b)/distances.length).toFixed(3)},${(times.reduce((a,b)=>a+b)/times.length).toFixed(2)}\n`;
+    csv += `Median,${median(distances).toFixed(3)},${median(times).toFixed(2)}\n`;
+    csv += `Std Dev,${standardDeviation(distances).toFixed(3)},${standardDeviation(times).toFixed(2)}\n`;
+    csv += `Min,${Math.min(...distances).toFixed(3)},${Math.min(...times).toFixed(2)}\n`;
+    csv += `Max,${Math.max(...distances).toFixed(3)},${Math.max(...times).toFixed(2)}\n`;
+    
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `benchmark_${algorithm}_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    showNotification("Benchmark data berhasil di-export sebagai CSV", "success");
+}
+
+// Internal algorithm runners (without visualization, for benchmark)
+async function runGeneticAlgorithmInternal() {
+    const populationSize = parseInt(document.getElementById("gaPopulationSize").value);
+    const generations = parseInt(document.getElementById("gaGenerations").value);
+    const mutationRate = parseFloat(document.getElementById("gaMutationRate").value);
+    const crossoverRate = parseFloat(document.getElementById("gaCrossoverRate").value);
+    const selectionMethod = document.getElementById("gaSelectionMethod").value;
+    const crossoverMethod = document.getElementById("gaCrossoverMethod").value;
+    const mutationMethod = document.getElementById("gaMutationMethod").value;
+    const elitismCount = parseInt(document.getElementById("gaElitismCount").value);
+    const adaptiveMutation = document.getElementById("gaAdaptiveMutation").checked;
+    const localSearchProb = parseFloat(document.getElementById("gaLocalSearchProb").value);
+    const diversityThreshold = parseFloat(document.getElementById("gaDiversityThreshold").value);
+    const stagnationLimit = parseInt(document.getElementById("gaStagnationLimit").value);
+    
+    const ga = new GeneticAlgorithm(hospitals, distanceMatrix);
+    ga.setParameters(
+        populationSize, generations, mutationRate, crossoverRate,
+        selectionMethod, crossoverMethod, mutationMethod, elitismCount,
+        adaptiveMutation, localSearchProb, diversityThreshold, stagnationLimit
+    );
+    
+    return await ga.run();
+}
+
+async function runSimulatedAnnealingInternal() {
+    const initialTemp = parseFloat(document.getElementById("saInitialTemp").value);
+    const finalTemp = parseFloat(document.getElementById("saFinalTemp").value);
+    const coolingRate = parseFloat(document.getElementById("saCoolingRate").value);
+    const iterationsPerTemp = parseInt(document.getElementById("saIterationsPerTemp").value);
+    const coolingSchedule = document.getElementById("saCoolingSchedule").value;
+    const reheating = document.getElementById("saReheating").checked;
+    const reheatThreshold = parseInt(document.getElementById("saReheatThreshold").value);
+    const earlyStop = document.getElementById("saEarlyStop").checked;
+    
+    const sa = new SimulatedAnnealing(hospitals, distanceMatrix);
+    sa.setParameters(
+        initialTemp, finalTemp, coolingRate, iterationsPerTemp,
+        coolingSchedule, reheating, reheatThreshold, earlyStop
+    );
+    
+    return await sa.run();
+}
+
+async function runDifferentialEvolutionInternal() {
+    const populationSize = parseInt(document.getElementById("dePopulationSize").value);
+    const generations = parseInt(document.getElementById("deGenerations").value);
+    const F = parseFloat(document.getElementById("deF").value);
+    const CR = parseFloat(document.getElementById("deCR").value);
+    const strategy = document.getElementById("deStrategy").value;
+    const crossoverType = document.getElementById("deCrossoverType").value;
+    const selfAdaptive = document.getElementById("deSelfAdaptive").checked;
+    
+    const de = new DifferentialEvolution(hospitals, distanceMatrix);
+    de.setParameters(populationSize, generations, F, CR, strategy, crossoverType, selfAdaptive);
+    
+    return await de.run();
+}
+
+// Event listeners
+document.addEventListener("DOMContentLoaded", () => {
+    initMap();
+    loadDataset();
+    
+    // Algorithm selection
+    document.getElementById("algorithmSelect").addEventListener("change", (e) => {
+        showParameters(e.target.value);
+    });
+    
+    // Run TSP
+    document.getElementById("btnRunTSP").addEventListener("click", runTSPOptimization);
+    
+    // Compare algorithms
+    document.getElementById("btnCompareTSP").addEventListener("click", compareAllAlgorithms);
+    
+    // Benchmark
+    document.getElementById("btnBenchmark").addEventListener("click", showBenchmarkModal);
+    document.getElementById("btnStartBenchmark").addEventListener("click", runBenchmark);
+    
+    // Show parameters modal
+    document.getElementById("btnShowParameters").addEventListener("click", () => {
+        document.getElementById("parametersModal").classList.remove("hidden");
+        const algorithm = document.getElementById("algorithmSelect").value;
+        showParameters(algorithm);
+    });
+    
+    // Close parameters modal
+    document.getElementById("closeParameters").addEventListener("click", () => {
+        document.getElementById("parametersModal").classList.add("hidden");
+    });
+    
+    // Close results modal
+    document.getElementById("closeResults").addEventListener("click", () => {
+        document.getElementById("resultsModal").classList.add("hidden");
+    });
+    
+    // Reset
+    document.getElementById("btnReset").addEventListener("click", resetMap);
+    
+    // Export results
+    document.getElementById("btnExportResults").addEventListener("click", exportResults);
+    
+    // Close modal when clicking outside
+    window.onclick = function (event) {
+        const parametersModal = document.getElementById("parametersModal");
+        const resultsModal = document.getElementById("resultsModal");
+        
+        if (event.target === parametersModal) {
+            parametersModal.classList.add("hidden");
+        }
+        if (event.target === resultsModal) {
+            resultsModal.classList.add("hidden");
+        }
+    };
+    
+    // Initialize with GA parameters visible
+    showParameters('ga');
 });
